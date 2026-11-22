@@ -75,11 +75,7 @@ for directory in ['pillow-13.0.0.dist-info', 'imageio_ffmpeg-0.8.1.dist-info']:
     for file in sorted((source / 'licenses').rglob('*')):
         if file.is_file():
             copy(file, Path('licenses') / directory / file.relative_to(source / 'licenses'))
-license_cache = ROOT / 'artifacts/distribution-licenses/GPL-3.0.txt'
-if not license_cache.exists():
-    license_cache.parent.mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen('https://www.gnu.org/licenses/gpl-3.0.txt', timeout=30) as response:
-        license_cache.write_bytes(response.read())
+license_cache = ROOT / 'third_party/GPL-3.0.txt'
 copy(license_cache, 'licenses/FFmpeg-GPL-3.0.txt')
 ffmpeg = next((OUT / 'codecs/deps/imageio_ffmpeg/binaries').glob('ffmpeg*.exe'))
 version = subprocess.run([str(ffmpeg), '-version'], capture_output=True, text=True, check=True).stdout
