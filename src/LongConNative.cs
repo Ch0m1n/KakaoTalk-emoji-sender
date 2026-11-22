@@ -38,9 +38,15 @@ namespace AgitCon {
                 return edits[0].TryGetCurrentPattern(ValuePattern.Pattern,out pattern)&&String.IsNullOrEmpty(((ValuePattern)pattern).Current.Value);
             }catch(ElementNotAvailableException){return false;}catch(InvalidOperationException){return false;}
         }
+        string longCurrentProblem="not-checked",longEnterProblem="not-attempted";
         bool LongProofCurrent(LongProof proof,PreviewChatTarget target){
-            if(proof==null||proof.Window==target.Window||!Native.IsWindow(proof.Window)||!IsWindowVisible(proof.Window)||!IsWindowEnabled(proof.Window)||Native.GetForegroundWindow()!=proof.Window||Class(proof.Window)!=proof.Class||!OwnedByRoom(proof.Window,target)||!SameRoom(target))return false;
-            uint pid;return Native.GetWindowThreadProcessId(proof.Window,out pid)==target.ThreadId&&pid==target.ProcessId&&proof.Structure();
+            longCurrentProblem="missing-proof";if(proof==null)return false;
+            longCurrentProblem="window-closed";if(proof.Window==target.Window||!Native.IsWindow(proof.Window)||!IsWindowVisible(proof.Window))return false;
+            longCurrentProblem="window-disabled";if(!IsWindowEnabled(proof.Window))return false;
+            longCurrentProblem="foreground-changed";if(Native.GetForegroundWindow()!=proof.Window)return false;
+            longCurrentProblem="class-owner-room-changed";if(Class(proof.Window)!=proof.Class||!OwnedByRoom(proof.Window,target)||!SameRoom(target))return false;
+            uint pid;longCurrentProblem="thread-process-changed";if(Native.GetWindowThreadProcessId(proof.Window,out pid)!=target.ThreadId||pid!=target.ProcessId)return false;
+            longCurrentProblem="structure-changed";if(!proof.Structure())return false;longCurrentProblem="confirmed";return true;
         }
         internal static bool LongEnterToWindow(IntPtr window){
             // Targeted queued keyboard messages, never global SendInput Enter.
@@ -54,7 +60,7 @@ namespace AgitCon {
                 if(!Valid(target)||Native.GetForegroundWindow()!=source||!Own(source)||!roomCurrent())throw new InvalidOperationException("대상 채팅방이 바뀌었어요. 카톡 입력창을 누른 뒤 다시 확인해주세요.");
                 UIntPtr draftLength;if(SendMessageTimeout(target.Editor,0x000E,IntPtr.Zero,IntPtr.Zero,0x22,150,out draftLength)==IntPtr.Zero)throw new InvalidOperationException("작성 문장 상태를 확인하지 못했어요.");
                 long processStart;using(var process=Process.GetProcessById((int)target.ProcessId))processStart=process.StartTime.ToUniversalTime().Ticks;
-                bool started=false;uint sequence=0;LongProof proof=null;HashSet<IntPtr> before=null;photoFocusLost=false;photoTarget=target;FileAttachmentInProgress=true;
+                longEnterProblem="not-attempted";longCurrentProblem="not-checked";bool started=false;uint sequence=0;LongProof proof=null;HashSet<IntPtr> before=null;photoFocusLost=false;photoTarget=target;FileAttachmentInProgress=true;
                 Func<bool> context=()=>{if(disposed||token.IsCancellationRequested||photoFocusLost||!roomCurrent()||!SameRoom(target))return false;try{using(var p=Process.GetProcessById((int)target.ProcessId))if(p.StartTime.ToUniversalTime().Ticks!=processStart)return false;}catch{return false;}
                     IntPtr foreground=Native.GetForegroundWindow();return (!started&&foreground==source)||(foreground==target.Window)||(before!=null&&!before.Contains(foreground)&&OwnedByRoom(foreground,target));};
                 Func<bool> composer=()=>{UIntPtr length;string reason;return context()&&Native.GetForegroundWindow()==target.Window&&Focus(target.ThreadId)==target.Editor&&Composer(target.Window,target.Editor)&&NoSelection(target.Editor,out reason)&&SendMessageTimeout(target.Editor,0x000E,IntPtr.Zero,IntPtr.Zero,0x22,150,out length)!=IntPtr.Zero&&length==draftLength;};
@@ -66,20 +72,25 @@ namespace AgitCon {
                         var outcome=await PasteFlow.Execute(paste,cancel);if(!outcome.Requested){if(trace!=null)trace(index,"paste-"+outcome.Stage+" / "+outcome.Block);throw new InvalidOperationException("콘을 붙여넣기 전에 대상·클립보드·포커스가 달라졌어요.");}started=true;
                     },
                     Preview=async cancel=>{
-                        var clock=Stopwatch.StartNew();var attempts=new Dictionary<IntPtr,int>();while(clock.ElapsedMilliseconds<7000){cancel.ThrowIfCancellationRequested();if(!context()||GetClipboardSequenceNumber()!=sequence)return null;
+                        var clock=Stopwatch.StartNew();var attempts=new LongPreviewAttempts();longVisualProblem="not-inspected";while(clock.ElapsedMilliseconds<7000){cancel.ThrowIfCancellationRequested();if(!context()||GetClipboardSequenceNumber()!=sequence)return null;
                             IntPtr candidate=Native.GetForegroundWindow();var windows=OwnedWindows(target).Where(w=>!before.Contains(w)&&w==candidate&&w!=target.Window).ToList();
-                            if(windows.Count==1){Func<bool> structure=null;if(LongStructure(candidate))structure=()=>LongStructure(candidate);else {int used;attempts.TryGetValue(candidate,out used);if(used<2){attempts[candidate]=used+1;structure=await LongVisualStructure(candidate,cancel);}}
+                            if(windows.Count==1){Func<bool> structure=null;if(LongStructure(candidate))structure=()=>LongStructure(candidate);else {if(attempts.Available(candidate)){structure=await LongVisualStructure(candidate,cancel);attempts.Finished(candidate,longVisionReadStarted);}}
                                 if(structure!=null){proof=new LongProof{Window=candidate,Class=Class(candidate),Structure=structure};if(LongProofCurrent(proof,target))return proof;}}
                             await Task.Delay(40,cancel);
                         }return null;
                     },
-                    Enter=value=>{var found=value as LongProof;if(!context()||GetClipboardSequenceNumber()!=sequence||Control.ModifierKeys!=Keys.None||!LongProofCurrent(found,target))return false;return LongEnterToWindow(found.Window);},
+                    Enter=value=>{var found=value as LongProof;
+                        longEnterProblem="context-changed";if(!context())return false;
+                        longEnterProblem="clipboard-changed";if(GetClipboardSequenceNumber()!=sequence)return false;
+                        longEnterProblem="modifiers-held";if(Control.ModifierKeys!=Keys.None)return false;
+                        longEnterProblem="proof-invalid";if(!LongProofCurrent(found,target))return false;
+                        longEnterProblem="post-key-result-unknown";bool sent=LongEnterToWindow(found.Window);if(sent)longEnterProblem="requested";return sent;},
                     Dismissed=async(value,cancel)=>{var found=(LongProof)value;var clock=Stopwatch.StartNew();while(clock.ElapsedMilliseconds<3500){cancel.ThrowIfCancellationRequested();if(!context())return false;
                             if(!Native.IsWindow(found.Window)||!IsWindowVisible(found.Window)){if(composer())return true;if(Native.GetForegroundWindow()!=target.Window)return false;}
                             await Task.Delay(10,cancel);
                         }return false;}
                 };
-                var result=await LongFlow.Run(ready.Parts.Count,checks,token);if(trace!=null)trace(result.Requested,result.Stage+" / pasted="+result.Pasted+" / "+longProofProblem);return result;
+                var result=await LongFlow.Run(ready.Parts.Count,checks,token);if(trace!=null)trace(result.Requested,result.Stage+" / pasted="+result.Pasted+" / "+longProofProblem+" / "+longVisualProblem+" / enter="+longEnterProblem+" / current="+longCurrentProblem);return result;
             }finally{FileAttachmentInProgress=false;photoTarget=null;transition=false;Invalidate();pasteGate.Release();}
         }
     }

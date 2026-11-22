@@ -9,6 +9,11 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace AgitCon {
+    internal sealed class LongPreviewAttempts {
+        readonly Dictionary<IntPtr,int> reads=new Dictionary<IntPtr,int>();
+        internal bool Available(IntPtr window){int count;return !reads.TryGetValue(window,out count)||count<2;}
+        internal void Finished(IntPtr window,bool readStarted){if(!readStarted)return;int count;reads.TryGetValue(window,out count);reads[window]=count+1;}
+    }
     [DataContract] public sealed class LongPreset {
         [DataMember] public string Name;
         [DataMember] public List<string> Keys=new List<string>();
@@ -88,7 +93,7 @@ namespace AgitCon {
         void LoadPreset(){var preset=stored.SelectedItem as LongPreset;if(preset==null)return;if(preset.Keys==null||preset.Keys.Count<2||preset.Keys.Count>20){Report("저장한 조각 정보가 올바르지 않아요.");return;}var loaded=preset.Keys.Select(resolve).ToList();if(loaded.Any(e=>e==null)){Report("목록에서 빠진 콘이 있어 불러오지 않았어요. 팩을 다시 추가해주세요.");return;}items.Clear();items.AddRange(loaded);name.Text=preset.Name;RefreshQueue();}
         void RefreshQueue(){previews.Cancel();previews.Dispose();previews=new CancellationTokenSource();list.Items.Clear();list.Items.AddRange(items.Select((e,i)=>(i+1)+". "+(e.DisplayName??Path.GetFileName(e.Path))).Cast<object>().ToArray());foreach(Control c in preview.Controls.Cast<Control>().ToArray())c.Dispose();preview.Controls.Clear();
             foreach(var entry in items){var picture=new PictureBox{Size=new Size(175,175),SizeMode=PictureBoxSizeMode.Zoom,BackColor=Color.White,Margin=new Padding(0,0,0,2)};preview.Controls.Add(picture);picture.Disposed+=(s,e)=>{if(picture.Image!=null)picture.Image.Dispose();};LoadPreview(entry,picture,previews.Token);}
-            start.Enabled=!Busy&&items.Count>=2;start.Text="롱콘 연속 전송 · "+items.Count+"장";Report("시작하면 해당 채팅방에 한 장씩 자동 전송해요. 정지 조각 2~20장.");
+            start.Enabled=!Busy&&items.Count>=2;start.Text="롱콘 연속 전송 · "+items.Count+"장";Report("시작 후에는 Enter·전송을 직접 누르지 말고 기다려주세요. 정지 조각 2~20장.");
         }
         async void LoadPreview(Entry entry,PictureBox picture,CancellationToken token){Bitmap bitmap=null;try{bitmap=await Task.Run(()=>{using(var source=Image.FromFile(DcShop.EnsureImage(entry,token))){if(ImageBundle.Animated(source))throw new Exception("움짤 조각은 지원하지 않아요.");var small=new Bitmap(350,350);using(var g=Graphics.FromImage(small)){g.Clear(Color.White);g.InterpolationMode=System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;g.DrawImage(source,ImageBundle.Fit(source.Size,new Rectangle(0,0,350,350)),0,0,source.Width,source.Height,GraphicsUnit.Pixel);}return small;}},token);if(token.IsCancellationRequested||picture.IsDisposed)return;picture.Image=bitmap;bitmap=null;}catch(Exception ex){if(!token.IsCancellationRequested&&!picture.IsDisposed){picture.BackColor=Color.MistyRose;Report(ex.Message);}}finally{if(bitmap!=null)bitmap.Dispose();}}
         async Task Start(){if(Busy||items.Count<2)return;running=new CancellationTokenSource();foreach(var c in editing)c.Enabled=false;start.Enabled=false;stop.Enabled=true;
