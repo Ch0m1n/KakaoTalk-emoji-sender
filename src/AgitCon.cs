@@ -269,6 +269,10 @@ namespace AgitCon {
                 form.collected.Add(new Entry{DisplayName="first"});form.collected.Add(new Entry{DisplayName="second"});
                 form.CompleteCollectionAttachment(false,true,form.collected.ToList());check(form.collected.Count==2);
                 form.CompleteCollectionAttachment(true,true,form.collected.ToList());check(form.collected.Count==0);
+                form.collectionMode=true;form.collectionDouble=false;form.collected.Add(new Entry{DisplayName="split"});
+                form.CompleteCollectionAttachment(false,false,form.collected.ToList());check(form.collectionMode&&form.collected.Count==1);
+                form.CompleteCollectionAttachment(true,false,form.collected.ToList());check(!form.collectionMode&&!form.collectionDouble&&form.collected.Count==0&&form.collectionButton.Text=="콘 9분할");
+
                 form.config=new Settings();form.config.UseSemantic=true;form.libraryMode=false;form.entries.Clear();form.draftActive=false;form.semanticVersion=20;form.draftGeneration=30;form.semanticRequest=new CancellationTokenSource();
                 form.BeginStickerSelection();check(form.semanticRequest.IsCancellationRequested);check(!form.AutomaticResultCurrent(20,false)&&!form.AutomaticResultCurrent(30,true));
                 form.copyRequest=new CancellationTokenSource();var copying=form.copyRequest;var picked=new Entry{DisplayName="selected animated sticker"};form.selected=picked;string tab=form.recommendTab.Text;
@@ -312,7 +316,7 @@ namespace AgitCon {
             try{progress.Report("조각 "+selected.Count+"장을 모두 미리 준비하고 있어요…");using(var prepared=await Task.Run(()=>LongPrepared.Create(selected,request.Token,n=>progress.Report("미리 준비 "+n+" / "+selected.Count+"장")),request.Token)){
                 request.Token.ThrowIfCancellationRequested();var outcome=await previewPaste.TryLongCon(destination,prepared,longWindow.Handle,request.Token,progress,()=>longSelecting&&roomVersion==versionAtStart,trace);
                 if(outcome.Requested>0){foreach(var entry in selected.Take(outcome.Requested))entry.LastUsed=DateTime.UtcNow.Ticks;Save();}
-                progress.Report(outcome.Complete?"롱콘 "+outcome.Requested+"장 전송 요청 완료 · 카톡에서 결과를 확인해주세요.":LongFlow.Reason(outcome.Stage)+" · 요청 "+outcome.Requested+"장. 중복 방지를 위해 자동 재시도하지 않아요.");
+                progress.Report(outcome.Complete?"롱콘 "+outcome.Requested+"장 전송 요청 완료 · 카톡에서 결과를 확인해주세요.":LongFlow.Reason(outcome.Stage)+" · 붙여넣기 "+outcome.Pasted+"장 / 자동 Enter "+outcome.Requested+"회. 이미 올라간 조각은 재시도하지 마세요.");
             }}catch(OperationCanceledException){trace(lastRequested,"canceled-"+lastStage);throw;}catch(Exception ex){trace(lastRequested,"failed-"+lastStage+" / "+ex.GetType().Name);throw;}finally{FinishCopy(request,false);}
         }
         void OpenCollection(){OpenCollectionMode(false);}
@@ -335,7 +339,7 @@ namespace AgitCon {
         }
         void CompleteCollectionAttachment(bool requested,bool isDouble,IEnumerable<Entry> selectedBatch){
             if(!requested)return;foreach(var entry in selectedBatch)entry.LastUsed=DateTime.UtcNow.Ticks;Save();
-            if(isDouble){collected.Clear();collectionVersion++;UpdateCollection();}
+            collected.Clear();collectionVersion++;if(!isDouble){collectionMode=false;collectionDouble=false;if(collectionWindow!=null&&!collectionWindow.IsDisposed)collectionWindow.Hide();}UpdateCollection();
         }
         // Disabling the clicked copy button can clear ContainsFocus while the
         // owned split window remains foreground. Check its HWND, not its child focus.
@@ -639,6 +643,7 @@ namespace AgitCon {
             if(args.Contains("--ui-zoom-test")){UiZoom.Test();return;}
             if(args.Contains("--arca-search-test")){ArcaSearchTests.Run();return;}
             if(args.Contains("--app-update-test")){try{AppUpdateTests.Run();}catch(Exception ex){File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"app-update-error.txt"),ex.ToString());Environment.ExitCode=1;}return;}
+            if(args.Contains("--longcon-vision-test")){PreviewPaste.TestLongVision();return;}
             if(args.Contains("--longcon-test")){LongConTests.Run();return;}
             if(args.Contains("--bundle-test")){BundleTests.Run();return;}
             if(args.Contains("--collection-render")){BundleTests.RenderSaved();return;}

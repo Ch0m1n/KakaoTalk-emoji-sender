@@ -66,10 +66,11 @@ namespace AgitCon {
                         var outcome=await PasteFlow.Execute(paste,cancel);if(!outcome.Requested){if(trace!=null)trace(index,"paste-"+outcome.Stage+" / "+outcome.Block);throw new InvalidOperationException("콘을 붙여넣기 전에 대상·클립보드·포커스가 달라졌어요.");}started=true;
                     },
                     Preview=async cancel=>{
-                        var clock=Stopwatch.StartNew();while(clock.ElapsedMilliseconds<3500){cancel.ThrowIfCancellationRequested();if(!context()||GetClipboardSequenceNumber()!=sequence)return null;
-                            var windows=OwnedWindows(target).Where(w=>!before.Contains(w)).ToList();if(windows.Count>1)return null;
-                            if(windows.Count==1&&Native.GetForegroundWindow()==windows[0]&&LongStructure(windows[0])){var candidate=windows[0];proof=new LongProof{Window=candidate,Class=Class(candidate),Structure=()=>LongStructure(candidate)};if(LongProofCurrent(proof,target))return proof;}
-                            await Task.Delay(10,cancel);
+                        var clock=Stopwatch.StartNew();var attempts=new Dictionary<IntPtr,int>();while(clock.ElapsedMilliseconds<7000){cancel.ThrowIfCancellationRequested();if(!context()||GetClipboardSequenceNumber()!=sequence)return null;
+                            IntPtr candidate=Native.GetForegroundWindow();var windows=OwnedWindows(target).Where(w=>!before.Contains(w)&&w==candidate&&w!=target.Window).ToList();
+                            if(windows.Count==1){Func<bool> structure=null;if(LongStructure(candidate))structure=()=>LongStructure(candidate);else {int used;attempts.TryGetValue(candidate,out used);if(used<2){attempts[candidate]=used+1;structure=await LongVisualStructure(candidate,cancel);}}
+                                if(structure!=null){proof=new LongProof{Window=candidate,Class=Class(candidate),Structure=structure};if(LongProofCurrent(proof,target))return proof;}}
+                            await Task.Delay(40,cancel);
                         }return null;
                     },
                     Enter=value=>{var found=value as LongProof;if(!context()||GetClipboardSequenceNumber()!=sequence||Control.ModifierKeys!=Keys.None||!LongProofCurrent(found,target))return false;return LongEnterToWindow(found.Window);},
@@ -78,7 +79,7 @@ namespace AgitCon {
                             await Task.Delay(10,cancel);
                         }return false;}
                 };
-                var result=await LongFlow.Run(ready.Parts.Count,checks,token);if(trace!=null)trace(result.Requested,result.Stage+" / "+longProofProblem);return result;
+                var result=await LongFlow.Run(ready.Parts.Count,checks,token);if(trace!=null)trace(result.Requested,result.Stage+" / pasted="+result.Pasted+" / "+longProofProblem);return result;
             }finally{FileAttachmentInProgress=false;photoTarget=null;transition=false;Invalidate();pasteGate.Release();}
         }
     }

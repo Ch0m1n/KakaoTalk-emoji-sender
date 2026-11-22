@@ -39,14 +39,14 @@ namespace AgitCon {
         internal Func<object,CancellationToken,Task<bool>> Dismissed;
         internal Action<int> Progress;
     }
-    internal sealed class LongFlowResult {internal int Requested;internal bool Complete;internal string Stage;}
+    internal sealed class LongFlowResult {internal int Requested,Pasted;internal bool Complete;internal string Stage;}
     internal static class LongFlow {
         internal static string Reason(string stage){switch(stage){case "before-paste":return "대상 채팅방이나 포커스가 바뀌었어요.";case "preview-proof":return "확인할 수 있는 이미지 전송창을 찾지 못했어요.";case "before-enter":return "전송 직전 창이나 포커스가 달라졌어요.";case "enter-result-unknown":return "Enter 요청 결과가 불확실해요.";case "after-enter":return "전송창이 닫히고 입력창으로 돌아온 것을 확인하지 못했어요.";default:return "전송을 계속할 수 없어 멈췄어요.";}}
         internal static async Task<LongFlowResult> Run(int count,LongFlowChecks c,CancellationToken token){
             if(count<2||count>20)throw new ArgumentOutOfRangeException("count");var result=new LongFlowResult();
             for(int i=0;i<count;i++){
                 token.ThrowIfCancellationRequested();result.Stage="before-paste";if(!c.Current())return result;
-                await c.Paste(i,token);token.ThrowIfCancellationRequested();result.Stage="preview-proof";
+                await c.Paste(i,token);result.Pasted++;token.ThrowIfCancellationRequested();result.Stage="preview-proof";
                 if(!c.Current())return result;object proof=await c.Preview(token);if(proof==null)return result;
                 token.ThrowIfCancellationRequested();result.Stage="before-enter";if(!c.Current())return result;
                 // Exactly one targeted Enter attempt per proved preview. Never retry.
