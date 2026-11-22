@@ -35,7 +35,7 @@ namespace AgitCon {
         static readonly SemaphoreSlim imageSlots=new SemaphoreSlim(2);
         internal static Func<Uri,string,CancellationToken,int,bool,byte[]> TestTransport;
         static bool ImageHost(Uri u) {return u.Scheme=="https"&&u.IsDefaultPort&&u.UserInfo==""&&
-            ((Regex.IsMatch(u.Host,@"^dcimg\d*\.dcinside\.com$")&&u.AbsolutePath=="/dccon.php")||u.Host=="ac.arca.live"||Regex.IsMatch(u.Host,@"^ac(?:-[opq])?\.namu\.la$"));}
+            ((u.Host=="arca.live"&&Regex.IsMatch(u.AbsolutePath,@"^/api/emoticon/\d{1,12}/thumb$"))||(Regex.IsMatch(u.Host,@"^dcimg\d*\.dcinside\.com$")&&u.AbsolutePath=="/dccon.php")||u.Host=="ac.arca.live"||Regex.IsMatch(u.Host,@"^ac(?:-[opq])?\.namu\.la$"));}
         public static Uri PersonalUrl(string url) {
             Uri u;if(!Uri.TryCreate(url.Trim(),UriKind.Absolute,out u)||!ImageHost(u))throw new Exception("디시콘 또는 아카콘의 HTTPS 이미지 링크를 넣어주세요.");
             if(u.Host.EndsWith(".dcinside.com")&&!Regex.IsMatch(u.Query,@"(?:^\?|&)no=[a-fA-F0-9]+(?:&|$)"))throw new Exception("디시콘 이미지 주소의 no 값이 없어요.");
@@ -55,7 +55,7 @@ namespace AgitCon {
                 if(body!=null) {req.Method="POST";req.ContentType="application/x-www-form-urlencoded; charset=UTF-8";req.Headers["X-Requested-With"]="XMLHttpRequest";byte[] bytes=Encoding.UTF8.GetBytes(body);req.ContentLength=bytes.Length;using(var output=req.GetRequestStream())output.Write(bytes,0,bytes.Length);}
                 using(cancel.Register(()=>req.Abort())) using(var response=(HttpWebResponse)req.GetResponse()) {
                     if((int)response.StatusCode>=300&&(int)response.StatusCode<400) {
-                        if(!imageOnly)throw new Exception(uri.Host=="arca.live"?"아카라이브가 로그인 화면으로 이동해요. 팩 링크 등록이나 HTML 가져오기를 사용해주세요.":"디시콘 서버 주소가 바뀌었어요.");
+                        if(!imageOnly){if(uri.Host=="arca.live")throw new ArcaSearchBlockedException(null);throw new Exception("DC search redirect requires an updated endpoint.");}
                         uri=PersonalUrl(new Uri(uri,response.Headers["Location"]).AbsoluteUri);continue;
                     }
                     if(response.ContentLength>limit)throw new Exception("응답 파일이 용량 제한을 넘었어요.");
