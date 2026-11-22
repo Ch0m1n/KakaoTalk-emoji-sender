@@ -43,7 +43,7 @@ $version = Get-Content -LiteralPath (Join-Path $root 'version.json') -Raw | Conv
 if($version.version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'){throw 'Invalid app version.'}
 $assemblyInfo=Join-Path $buildDir 'AssemblyInfo.cs'
 ('[assembly:System.Reflection.AssemblyVersion("'+$version.version+'.0")][assembly:System.Reflection.AssemblyFileVersion("'+$version.version+'.0")][assembly:System.Reflection.AssemblyProduct("KakaoTalk emoji sender")]') | Set-Content -LiteralPath $assemblyInfo -Encoding utf8
-$updateSources=@((Join-Path $root 'src/LongPreviewVision.cs'),(Join-Path $root 'src/ArcaBrowserSearch.cs'),(Join-Path $root 'src/ArcaSearchTests.cs'),(Join-Path $root 'src/AppUpdateCore.cs'),(Join-Path $root 'src/AppUpdates.cs'),(Join-Path $root 'src/AppUpdateTests.cs'),$assemblyInfo)
+$updateSources=@((Join-Path $root 'src/ThumbnailMemory.cs'),(Join-Path $root 'src/LongPreviewVision.cs'),(Join-Path $root 'src/ArcaBrowserSearch.cs'),(Join-Path $root 'src/ArcaSearchTests.cs'),(Join-Path $root 'src/AppUpdateCore.cs'),(Join-Path $root 'src/AppUpdates.cs'),(Join-Path $root 'src/AppUpdateTests.cs'),$assemblyInfo)
 $compression=@('/reference:System.IO.Compression.dll','/reference:System.IO.Compression.FileSystem.dll')
 $client = Join-Path $wpf 'UIAutomationClient.dll'
 $types = Join-Path $wpf 'UIAutomationTypes.dll'

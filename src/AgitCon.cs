@@ -630,6 +630,7 @@ namespace AgitCon {
             if(args.Contains("--ocr-check")){OcrSetupForm.Probe();return;}
             if(args.Contains("--thumbnail-recovery-test")){LibraryGrid.TestRecovery();return;}
             if(args.Contains("--thumbnail-settings-test")){SemanticSettingsForm.TestThumbnails();return;}
+            if(args.Contains("--thumbnail-memory-test")){EncodedPreviews.Test();return;}
             if(args.Contains("--thumbnail-cache-test")){LibraryGrid.TestPersistentCache();return;}
             if(args.Contains("--library-memory-speed")){LibraryGrid.TestCacheSpeed(true);return;}
             if(args.Contains("--library-cache-speed")){LibraryGrid.TestCacheSpeed();return;}
