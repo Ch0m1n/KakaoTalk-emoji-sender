@@ -1,0 +1,26 @@
+using System;using System.Diagnostics;using System.Drawing;using System.IO;using System.Runtime.InteropServices;using System.Threading;using System.Windows.Forms;
+namespace AgitCon {
+ internal static class DpiPolicyTests {
+  [DllImport("user32.dll")]static extern IntPtr GetThreadDpiAwarenessContext();
+  [DllImport("user32.dll")]static extern IntPtr GetWindowDpiAwarenessContext(IntPtr window);
+  [DllImport("user32.dll")]static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+  [DllImport("user32.dll")]static extern bool AreDpiAwarenessContextsEqual(IntPtr a,IntPtr b);
+  [DllImport("kernel32.dll")]static extern uint GetCurrentThreadId();
+  [DllImport("user32.dll")]static extern bool PostMessage(IntPtr window,uint message,IntPtr w,IntPtr l);
+  sealed class Fixture:Form{protected override bool ShowWithoutActivation{get{return true;}}}
+  internal static void FixtureMain(string[] args){if(args.Length!=3)throw new ArgumentException("Fixture args");int mode=Int32.Parse(args[1]);if(mode!=-1&&mode!=-2&&mode!=-4)throw new ArgumentException("Fixture mode");string path=Path.GetFullPath(args[2]),prefix=Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-work"))+Path.DirectorySeparatorChar;if(!path.StartsWith(prefix,StringComparison.OrdinalIgnoreCase))throw new ArgumentException("Fixture path");
+   IntPtr previous=SetThreadDpiAwarenessContext(new IntPtr(mode));if(previous==IntPtr.Zero)throw new Exception("Fixture DPI mode");using(var form=new Fixture{ShowInTaskbar=false,FormBorderStyle=FormBorderStyle.None,AutoScaleMode=AutoScaleMode.None,Location=new Point(-30000,-30000),StartPosition=FormStartPosition.Manual,Size=new Size(240,160),BackColor=Color.DarkBlue}){IntPtr handle=form.Handle;SetThreadDpiAwarenessContext(previous);form.Shown+=(s,e)=>{File.WriteAllText(path+".tmp",handle.ToInt64().ToString());File.Move(path+".tmp",path);};Application.Run(form);}
+  }
+  internal static void Run(){int checks=0,original=UiZoom.Percent;Action<bool> check=ok=>{if(!ok)throw new Exception("DPI policy check "+checks);checks++;};string root=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-work","dpi-policy-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
+   try{check(AreDpiAwarenessContextsEqual(GetThreadDpiAwarenessContext(),new IntPtr(-1)));foreach(int zoom in new[]{100,150,200}){UiZoom.Percent=zoom;using(var palette=new MainForm(true)){IntPtr own=palette.Handle;UiZoom.Install(palette);var size=palette.ClientSize;float font=palette.Font.SizeInPoints;check(palette.AutoScaleMode==AutoScaleMode.None);check(AreDpiAwarenessContextsEqual(GetWindowDpiAwarenessContext(own),new IntPtr(-1)));
+    foreach(int mode in new[]{-1,-2,-4}){string file=Path.Combine(root,"ready-"+zoom+"-"+mode+".txt");var start=new ProcessStartInfo(typeof(Program).Assembly.Location,"--dpi-window-fixture "+mode+" \""+file+"\""){UseShellExecute=false,CreateNoWindow=true,WindowStyle=ProcessWindowStyle.Hidden,WorkingDirectory=AppDomain.CurrentDomain.BaseDirectory};using(var process=Process.Start(start)){
+     IntPtr window=IntPtr.Zero;try{var timer=Stopwatch.StartNew();while(!File.Exists(file)&&!process.HasExited&&timer.ElapsedMilliseconds<5000){Application.DoEvents();Thread.Sleep(10);}check(File.Exists(file));window=new IntPtr(Int64.Parse(File.ReadAllText(file)));uint pid;Native.GetWindowThreadProcessId(window,out pid);check(pid==(uint)process.Id);uint uiThread=GetCurrentThreadId();IntPtr baseline=GetThreadDpiAwarenessContext();
+      for(int i=0;i<3;i++){Native.Rect raster,physical;check(DpiGeometry.GetRect(window,out raster)&&DpiGeometry.GetPhysicalRect(window,out physical));check(DpiGeometry.InWindowContext(window,false,()=>GetCurrentThreadId())!=uiThread);using(var image=ConfirmationNavigator.Capture(window,new Rectangle(0,0,raster.Right-raster.Left,raster.Bottom-raster.Top)))check(image.Width==raster.Right-raster.Left&&image.GetPixel(image.Width/2,image.Height/2).B>80);check(AreDpiAwarenessContextsEqual(baseline,GetThreadDpiAwarenessContext()));check(palette.ClientSize==size&&palette.Font.SizeInPoints==font&&UiZoom.Percent==zoom);}
+      IntPtr foreign=SetThreadDpiAwarenessContext(new IntPtr(-4));try{DpiGeometry.OwnUi(palette,()=>check(AreDpiAwarenessContextsEqual(GetThreadDpiAwarenessContext(),GetWindowDpiAwarenessContext(own))));check(AreDpiAwarenessContextsEqual(GetThreadDpiAwarenessContext(),new IntPtr(-4)));}finally{SetThreadDpiAwarenessContext(foreign);}check(palette.ClientSize==size&&palette.Font.SizeInPoints==font);
+     }finally{if(window!=IntPtr.Zero){uint pid;Native.GetWindowThreadProcessId(window,out pid);if(pid==(uint)process.Id)PostMessage(window,0x0010,IntPtr.Zero,IntPtr.Zero);}if(!process.WaitForExit(3000))process.Kill();}
+    }}
+   }}File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"dpi-policy-test.txt"),"PASS "+checks+" manifest policy, own UI scope, isolated foreign-window geometry/capture and unchanged palette size/font at app zoom 100/150/200. Own fixture processes only. Actual Windows display scale/resolution not changed; real 4K Kakao attachment not verified.");
+   }catch(Exception ex){File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"dpi-policy-test.txt"),"FAIL "+ex);Environment.ExitCode=1;}finally{UiZoom.Percent=original;}
+  }
+ }
+}

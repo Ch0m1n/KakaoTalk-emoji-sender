@@ -22,7 +22,7 @@ jobs:
         run: ./build.ps1
       - shell: pwsh
         run: |
-          ./tools/test-build.ps1 -Flags @('--hover-animation-test','--thumbnail-memory-test','--thumbnail-cache-test','--scroll-repaint-test','--arca-search-test','--app-update-test','--longcon-test','--ui-zoom-test','--release-self-check','--copy-refresh-test')
+          ./tools/test-build.ps1 -Flags @('--dpi-policy-test','--dpi-geometry-test','--ui-zoom-test','--hover-animation-test','--thumbnail-memory-test','--thumbnail-cache-test','--scroll-repaint-test','--arca-search-test','--app-update-test','--longcon-test','--ui-zoom-test','--release-self-check','--copy-refresh-test')
           ./tools/test-update.ps1
           ./tools/test-updater-handoff.ps1
       - run: python tools/package-release.py

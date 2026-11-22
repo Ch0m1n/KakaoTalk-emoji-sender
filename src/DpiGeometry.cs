@@ -2,10 +2,13 @@
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using System.Threading.Tasks;
 
 namespace AgitCon {
     // Synchronous scopes only: never carry a thread's DPI context across an await.
     internal static class DpiGeometry {
+        static readonly uint ownProcess=(uint)System.Diagnostics.Process.GetCurrentProcess().Id;
+        internal static void OwnUi(Control control,Action action){if(!control.IsHandleCreated){action();return;}InWindowContext(control.Handle,false,()=>{action();return true;});}
         [DllImport("user32.dll")]static extern IntPtr GetWindowDpiAwarenessContext(IntPtr window);
         [DllImport("user32.dll")]static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
         [DllImport("user32.dll")]static extern IntPtr MonitorFromWindow(IntPtr window,uint flags);
@@ -16,8 +19,15 @@ namespace AgitCon {
             internal Scope(IntPtr window,bool physical=false){thread=GetCurrentThreadId();var context=physical?new IntPtr(-4):GetWindowDpiAwarenessContext(window);if(context==IntPtr.Zero)throw new InvalidOperationException("Window DPI context unavailable");previous=SetThreadDpiAwarenessContext(context);if(previous==IntPtr.Zero&&physical)previous=SetThreadDpiAwarenessContext(new IntPtr(-3));if(previous==IntPtr.Zero)throw new InvalidOperationException("DPI scope unavailable");}
             public void Dispose(){if(disposed)return;if(thread!=GetCurrentThreadId())throw new InvalidOperationException("DPI scope crossed threads");SetThreadDpiAwarenessContext(previous);disposed=true;}
         }
-        internal static bool GetRect(IntPtr window,out Native.Rect rect){rect=new Native.Rect();try{using(new Scope(window))return Native.GetWindowRect(window,out rect);}catch{return false;}}
-        internal static bool GetPhysicalRect(IntPtr window,out Native.Rect rect){rect=new Native.Rect();try{using(new Scope(window,true))return Native.GetWindowRect(window,out rect);}catch{return false;}}
+        internal static T InWindowContext<T>(IntPtr window,bool physical,Func<T> action){
+            Func<T> scoped=()=>{using(new Scope(window,physical))return action();};uint pid;Native.GetWindowThreadProcessId(window,out pid);
+            // A foreign HWND's DPI context belongs on a worker, never the UI thread.
+            // Keep own-window calls synchronous so PrintWindow cannot deadlock on
+            // the caller's own window procedure while the caller waits for a worker.
+            return pid!=ownProcess?Task.Run(scoped).GetAwaiter().GetResult():scoped();
+        }
+        internal static bool GetRect(IntPtr window,out Native.Rect rect){rect=new Native.Rect();try{var value=InWindowContext(window,false,()=>{Native.Rect found;bool ok=Native.GetWindowRect(window,out found);return Tuple.Create(ok,found);});rect=value.Item2;return value.Item1;}catch{return false;}}
+        internal static bool GetPhysicalRect(IntPtr window,out Native.Rect rect){rect=new Native.Rect();try{var value=InWindowContext(window,true,()=>{Native.Rect found;bool ok=Native.GetWindowRect(window,out found);return Tuple.Create(ok,found);});rect=value.Item2;return value.Item1;}catch{return false;}}
         internal static string Stamp(IntPtr window){var monitor=MonitorFromWindow(window,2);int scale;try{if(GetScaleFactorForMonitor(monitor,out scale)!=0)scale=0;}catch{scale=0;}return monitor.ToInt64()+":"+scale+":"+ConfirmationNavigator.Dpi(window);}
         internal static string Describe(IntPtr window){Native.Rect native,physical;if(!GetRect(window,out native)||!GetPhysicalRect(window,out physical))return "window-geometry-unavailable";return "windowDpi="+ConfirmationNavigator.Dpi(window)+"; raster="+(native.Right-native.Left)+"x"+(native.Bottom-native.Top)+"; physical="+(physical.Right-physical.Left)+"x"+(physical.Bottom-physical.Top);}
         internal static bool MapPoint(Size raster,Rectangle physical,Point relative,out Point result){result=Point.Empty;if(raster.Width<=0||raster.Height<=0||physical.Width<=0||physical.Height<=0||relative.X<0||relative.Y<0||relative.X>=raster.Width||relative.Y>=raster.Height)return false;result=new Point(physical.Left+Math.Min(physical.Width-1,(int)Math.Floor((relative.X+.5)*physical.Width/raster.Width)),physical.Top+Math.Min(physical.Height-1,(int)Math.Floor((relative.Y+.5)*physical.Height/raster.Height)));return physical.Contains(result);}

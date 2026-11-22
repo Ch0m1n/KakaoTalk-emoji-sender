@@ -169,7 +169,7 @@ namespace AgitCon {
             catalogIndexer.Progress=(done,failed,total)=>{if(!IsDisposed&&libraryMode&&copyRequest==null)Tell("콘 자동 분석 · "+(done+failed)+" / "+total+(failed>0?" · "+failed+"개 실패":""));};
             indexRefresh.Tick+=(s,e)=>{indexRefresh.Stop();RefreshIndexedRecommendations();};
             previewOnly=visualPreview;previewPaste=new PreviewPaste(!visualPreview);semantic.Progress=message=>{if(copyRequest==null){Tell(message);SetRecommendationHint(message);}};
-            Icon=Ui.AppIcon();Text="아지트콘"; Font=Ui.Regular(10); ForeColor=Ui.Ink;ClientSize=new Size(420,690);
+            AutoScaleMode=AutoScaleMode.None;Icon=Ui.AppIcon();Text="아지트콘"; Font=Ui.Regular(10); ForeColor=Ui.Ink;ClientSize=new Size(420,690);
             MinimumSize=new Size(350,590); FormBorderStyle=FormBorderStyle.Sizable;
             BackColor=Ui.Paper; StartPosition=FormStartPosition.CenterScreen;
             layout=new TableLayoutPanel {Dock=DockStyle.Fill,Padding=new Padding(14),ColumnCount=1,RowCount=10};
@@ -250,7 +250,8 @@ namespace AgitCon {
         public static void RenderRankedSample(List<Entry> found,string name,string note=null){using(var form=new MainForm(true)){form.SetLibraryMode(false);form.ClientSize=new Size(650,750);using(var surface=new UserControl{Size=form.ClientSize,Font=form.Font,BackColor=Ui.Paper}){form.Controls.Remove(form.layout);surface.Controls.Add(form.layout);surface.CreateControl();form.Render(found);if(note!=null)form.Tell(note);for(int i=0;i<15;i++){Application.DoEvents();System.Threading.Thread.Sleep(60);}using(var bitmap=new Bitmap(surface.Width,surface.Height)){surface.DrawToBitmap(bitmap,new Rectangle(Point.Empty,bitmap.Size));bitmap.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,name));}}form.tray.Dispose();form.previewPaste.Dispose();form.watch.Dispose();}}
         void SetLibraryMode(bool show,bool automatic=false){BeginStickerSelection();if(!automatic)libraryPinned=show;if(show)ClearDraft(false);rankedGrid.Visible=false;libraryMode=show;libraryTab.Active=show;recommendTab.Active=!show;libraryTab.Invalidate();recommendTab.Invalidate();library.Visible=show;rows.Visible=!show;ApplyFloatingMode();}
         void ShowLibraryMenu(Entry entry,Point point){var menu=new ContextMenuStrip();menu.Items.Add("별칭 편집",null,(s,e)=>EditAliases(entry));menu.Items.Add("카톡 호환 PNG/GIF 파일 복사",null,(s,e)=>Copy(entry,true,false));menu.Items.Add("원본 파일만 복사",null,(s,e)=>Copy(entry,false,false));menu.Closed+=(s,e)=>Ui.DisposeMenuLater(menu);menu.Show(point);}
-        void ApplyFloatingMode(){if(layout==null)return;compact=follow.Checked;SuspendLayout();MinimumSize=compact?new Size(UiZoom.Installed(this)?UiZoom.Px(310):310,UiZoom.Installed(this)?UiZoom.Px(360):360):new Size(UiZoom.Installed(this)?UiZoom.Px(350):350,UiZoom.Installed(this)?UiZoom.Px(590):590);layout.Padding=new Padding(UiZoom.Installed(this)?UiZoom.Px(compact?10:14):(compact?10:14));int[] heights=compact?new[]{44,30,0,46,-1,0,0,0,28,32}:new[]{44,32,0,46,-1,26,31,36,30,42};for(int i=0;i<heights.Length;i++){var control=layout.GetControlFromPosition(0,i);if(control!=null)control.Visible=heights[i]!=0;if(i!=4){layout.RowStyles[i].SizeType=SizeType.Absolute;layout.RowStyles[i].Height=UiZoom.Installed(this)?UiZoom.Px(heights[i]):heights[i];}}ClientSize=compact?new Size(UiZoom.Installed(this)?UiZoom.Px(400):400,UiZoom.Installed(this)?UiZoom.Px(libraryMode?600:450):(libraryMode?600:450)):new Size(UiZoom.Installed(this)?UiZoom.Px(500):500,UiZoom.Installed(this)?UiZoom.Px(730):730);UpdateAliasLayout();ResumeLayout(true);if(config!=null&&!refreshing)Render();}
+        void ApplyFloatingMode(){DpiGeometry.OwnUi(this,ApplyFloatingLayout);}
+        void ApplyFloatingLayout(){if(layout==null)return;compact=follow.Checked;SuspendLayout();MinimumSize=compact?new Size(UiZoom.Installed(this)?UiZoom.Px(310):310,UiZoom.Installed(this)?UiZoom.Px(360):360):new Size(UiZoom.Installed(this)?UiZoom.Px(350):350,UiZoom.Installed(this)?UiZoom.Px(590):590);layout.Padding=new Padding(UiZoom.Installed(this)?UiZoom.Px(compact?10:14):(compact?10:14));int[] heights=compact?new[]{44,30,0,46,-1,0,0,0,28,32}:new[]{44,32,0,46,-1,26,31,36,30,42};for(int i=0;i<heights.Length;i++){var control=layout.GetControlFromPosition(0,i);if(control!=null)control.Visible=heights[i]!=0;if(i!=4){layout.RowStyles[i].SizeType=SizeType.Absolute;layout.RowStyles[i].Height=UiZoom.Installed(this)?UiZoom.Px(heights[i]):heights[i];}}ClientSize=compact?new Size(UiZoom.Installed(this)?UiZoom.Px(400):400,UiZoom.Installed(this)?UiZoom.Px(libraryMode?600:450):(libraryMode?600:450)):new Size(UiZoom.Installed(this)?UiZoom.Px(500):500,UiZoom.Installed(this)?UiZoom.Px(730):730);UpdateAliasLayout();ResumeLayout(true);if(config!=null&&!refreshing)Render();}
         void BindRoom(ChatAnchor next){if(anchor==null||anchor.Key!=next.Key){if(anchor!=null)roomQueries[anchor.Key]=search.Text;roomVersion++;if(copyRequest!=null)copyRequest.Cancel();anchor=next;target=next.Window;targetTitle=next.Title;string query;roomQueries.TryGetValue(next.Key,out query);switchingRoom=true;try{search.Text=query??"";}finally{switchingRoom=false;}}else anchor=next;}
         void SetRecommendationCaption(string text){recommendTab.Text=text;recommendTab.AccessibleName=text;recommendTab.Invalidate();}
         void SetRecommendationHint(string text){var hint=rows.Controls.OfType<Label>().FirstOrDefault();if(hint!=null)hint.Text=text;}
@@ -327,7 +328,7 @@ namespace AgitCon {
             }
             UpdateCollection();collectionWindow.Show(this);collectionWindow.Activate();Tell(collectionDouble?"원본 두 개를 차례로 선택해주세요. 움짤도 함께 첨부할 수 있어요.":"콘 목록에서 정지 콘 하나를 선택해주세요. 창을 닫으면 개별 첨부로 돌아가요.");
         }
-        async void CopyCollection(BundleMode mode){if(!collectionMode||(collectionDouble?(mode!=BundleMode.Double||collected.Count!=2):(mode!=BundleMode.SplitNine||collected.Count!=1)))return;BeginStickerSelection();var destination=previewPaste.Snapshot();long startedRoom=roomVersion;IntPtr sourceWindow=collectionWindow!=null&&!collectionWindow.IsDisposed?collectionWindow.Handle:Handle;if(compact&&(anchor==null||destination==null||destination.Window!=anchor.Window||destination.Editor!=anchor.Editor||destination.Title!=anchor.Title))destination=null;var request=new CancellationTokenSource();copyRequest=request;int version=collectionVersion;var chosen=collected[0];var selectedBatch=collected.ToList();bool isDouble=collectionDouble;copyAssetDescription=isDouble?"Double original file list":"SplitNine PNG file list";copyGeometryDescription="manual Open and Send";TraceCopy(request,"Preparing nine-slice files");if(collectionWindow!=null)collectionWindow.SetBusy(true);
+        async void CopyCollection(BundleMode mode){if(!collectionMode||(collectionDouble?(mode!=BundleMode.Double||collected.Count!=2):(mode!=BundleMode.SplitNine||collected.Count!=1)))return;BeginStickerSelection();var destination=previewPaste.Snapshot();long startedRoom=roomVersion;IntPtr sourceWindow=collectionWindow!=null&&!collectionWindow.IsDisposed?collectionWindow.Handle:Handle;if(compact&&(anchor==null||destination==null||destination.Window!=anchor.Window||destination.Editor!=anchor.Editor||destination.Title!=anchor.Title))destination=null;var request=new CancellationTokenSource();copyRequest=request;int version=collectionVersion;var chosen=collected[0];var selectedBatch=collected.ToList();bool isDouble=collectionDouble;copyAssetDescription=isDouble?"Double original file list":"SplitNine PNG file list";copyGeometryDescription="manual Open and Send";copyPaletteBefore=PaletteGeometry();TraceCopy(request,"Preparing nine-slice files");if(collectionWindow!=null)collectionWindow.SetBusy(true);
             try{Tell(isDouble?"선택한 원본 두 개를 준비하고 있어요...":"선택한 콘을 9개의 PNG로 나누고 있어요...");var paths=await Task.Run(()=>{var originals=selectedBatch.Select(entry=>isDouble?DcShop.EnsureAttachment(entry,request.Token):DcShop.EnsureImage(entry,request.Token)).ToArray();return ImageBundle.Create(originals,isDouble?BundleMode.Double:BundleMode.SplitNine,request.Token,chosen.DisplayName);},request.Token);
                 if(request.IsCancellationRequested||IsDisposed||!collectionMode||version!=collectionVersion){TraceCopy(request,"Nine-slice copy canceled before clipboard");return;}
                 if(!ContainsFocus&&Native.GetForegroundWindow()!=Handle&&!SplitWindowForeground(collectionWindow,Native.GetForegroundWindow())){TraceCopy(request,"Nine-slice source window lost foreground");Tell("분할 완료 · 포커스가 바뀌어 복사를 멈췄어요. 다시 복사해주세요.");return;}
@@ -439,15 +440,16 @@ namespace AgitCon {
         void Select(Entry entry) {selected=entry;UpdateAliasLayout(); editing=true; aliases.Text=entry.Aliases; editing=false;detail.Text="별칭: "+(entry.DisplayName??System.IO.Path.GetFileName(entry.Path));}
         void EditAliases(Entry entry){BeginStickerSelection();if(refreshing||entry==null)return;ClearDraft(false);modal=true;bool saved=false;try{using(var editor=new AliasEditor(entry)){if(editor.ShowDialog(this)==DialogResult.OK){entry.Aliases=editor.Value;Save();saved=true;}}}finally{modal=false;Render();}if(saved)Tell("별칭을 저장했어요. 원본 이름은 그대로예요.");}
         void SaveAliases() {BeginStickerSelection();if(refreshing){Tell("폴더 확인이 끝난 뒤 저장해주세요.");return;}if(selected==null)return;selected.Aliases=aliases.Text.Trim();Save();Render();Tell("별칭을 저장했어요. 원본 이름은 그대로예요.");}
-        string copyAssetDescription="",copyGeometryDescription="";
-        void TraceCopy(CancellationTokenSource request,string stage){if(copyRequest!=request)return;try{File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"attachment-last.txt"),DateTime.UtcNow.ToString("o")+"\r\n"+stage+"\r\nAsset="+copyAssetDescription+"\r\nGeometry="+copyGeometryDescription+"\r\nLibrary="+libraryMode+"; Pinned="+libraryPinned+"; Visible="+Visible+"; ContainsFocus="+ContainsFocus+"\r\n");}catch{}}
+        string copyAssetDescription="",copyGeometryDescription="",copyPaletteBefore="";
+        string PaletteGeometry(){if(IsDisposed||!IsHandleCreated)return "no-window";return DpiGeometry.InWindowContext(Handle,false,()=>"ui="+UiZoom.Percent+"%;client="+ClientSize.Width+"x"+ClientSize.Height+";font="+Font.SizeInPoints.ToString("0.##",System.Globalization.CultureInfo.InvariantCulture)+";"+DpiGeometry.Describe(Handle));}
+        void TraceCopy(CancellationTokenSource request,string stage){if(copyRequest!=request)return;try{File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"attachment-last.txt"),DateTime.UtcNow.ToString("o")+"\r\n"+stage+"\r\nAsset="+copyAssetDescription+"\r\nGeometry="+copyGeometryDescription+"\r\nPaletteBefore="+copyPaletteBefore+"\r\nPaletteNow="+PaletteGeometry()+"\r\nLibrary="+libraryMode+"; Pinned="+libraryPinned+"; Visible="+Visible+"; ContainsFocus="+ContainsFocus+"\r\n");}catch{}}
         async void Copy(Entry entry,bool compatible=false,bool imageClipboard=true) {
             if(entry==null)return;
             BeginStickerSelection();
             PreviewChatTarget destination=previewPaste.Snapshot();
             long startedRoom=roomVersion;if(compact&&(anchor==null||destination==null||destination.Window!=anchor.Window||destination.Editor!=anchor.Editor||destination.Title!=anchor.Title))destination=null;
             if(copyRequest!=null)copyRequest.Cancel();
-            var request=new CancellationTokenSource();copyRequest=request;copyAssetDescription="";copyGeometryDescription="";
+            var request=new CancellationTokenSource();copyRequest=request;copyAssetDescription="";copyGeometryDescription="";copyPaletteBefore=PaletteGeometry();
             try {
                 TraceCopy(request,"Preparing selected sticker");Tell("선택한 콘을 준비하고 있어요...");
                 string path=await Task.Run(()=>DcShop.EnsureAttachment(entry,request.Token,compatible),request.Token);
@@ -515,7 +517,8 @@ namespace AgitCon {
                 else if(follow.Checked)DockToTarget();
             } else if(follow.Checked && Visible) Hide();
         }
-        void DockToTarget() {
+        void DockToTarget(){DpiGeometry.OwnUi(this,DockToTargetLayout);}
+        void DockToTargetLayout() {
             if(movingPalette)return;
             if(compact&&anchor!=null){FloatingOffset offset;if(!roomPositions.TryGetValue(anchor.Key,out offset))offset=config.FloatingPosition;var bounds=offset==null?ChatFloating.Place(anchor.ChatRect,anchor.InputRect,Size,Screen.FromHandle(anchor.Window).WorkingArea):ChatFloating.PlaceCustom(anchor.InputRect,Size,offset,Screen.FromRectangle(offset.Desired(anchor.InputRect,Size)).WorkingArea);if(Bounds!=bounds)Bounds=bounds;return;}
             Native.Rect r;if(!Native.GetWindowRect(target,out r))return;
@@ -530,6 +533,8 @@ namespace AgitCon {
     static class Program {
         internal static System.Threading.EventWaitHandle ShowRequest;
         [STAThread] static void Main(string[] args) {
+            if(args.Length>0&&args[0]=="--dpi-window-fixture"){DpiPolicyTests.FixtureMain(args);return;}
+            if(args.Contains("--dpi-policy-test")){DpiPolicyTests.Run();return;}
 #if AGITCON_DEV
             if(args.Contains("--quality-catalog-only")){QualityAudit.Run("catalog-only");return;}
             if(args.Contains("--quality-independent")){QualityAudit.Run("independent");return;}
