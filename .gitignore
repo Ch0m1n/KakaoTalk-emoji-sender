@@ -11,6 +11,8 @@
 !/tools/package-release.py
 !/tools/test-build.ps1
 !/tools/test-update.ps1
+!/tools/test-updater-handoff.ps1
+!/tools/VerifyPublishedUpdate.cs
 !/tools/Update-Core.ps1
 !/tools/update-running.ps1
 /tests/

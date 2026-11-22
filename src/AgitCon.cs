@@ -637,7 +637,7 @@ namespace AgitCon {
             if(args.Contains("--lazy-test")) {LazyTests.Run(args.Contains("--live"));return;}
             if(args.Contains("--cache-maintenance-test")){CacheMaintenance.Test();return;}
             if(args.Contains("--ui-zoom-test")){UiZoom.Test();return;}
-            if(args.Contains("--app-update-test")){AppUpdateTests.Run();return;}
+            if(args.Contains("--app-update-test")){try{AppUpdateTests.Run();}catch(Exception ex){File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"app-update-error.txt"),ex.ToString());Environment.ExitCode=1;}return;}
             if(args.Contains("--longcon-test")){LongConTests.Run();return;}
             if(args.Contains("--bundle-test")){BundleTests.Run();return;}
             if(args.Contains("--collection-render")){BundleTests.RenderSaved();return;}

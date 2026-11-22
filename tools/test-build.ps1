@@ -9,7 +9,7 @@ $build=Join-Path $project ('artifacts/build/'+$name)
 $safe=@('--app-update-test','--ui-zoom-test','--longcon-test','--cache-maintenance-test','--bundle-test','--gif-direct-test','--gear-readiness-test','--confirmation-vision-test','--scroll-repaint-test','--release-self-check','--catalog-load-test','--catalog-encoding-test','--library-test','--rail-lifetime-test','--copy-refresh-test','--dpi-geometry-test','--gif-attachment-test','--ocr-setup-test','--thumbnail-recovery-test','--thumbnail-cache-test','--image-clipboard-test','--photo-native-test','--photo-attachment-test','--attachment-flow-test','--gif-open-settings-test','--draft-test','--preview-paste-test','--floating-test','--floating-position-test','--install-progress-test','--install-progress-render')
 if (!$Flags.Count -or @($Flags | Where-Object { $_ -notin $safe }).Count) { throw 'Only offline, non-Kakao test flags are allowed.' }
 if (!(Test-Path -LiteralPath (Join-Path $build $OutputName))) { throw 'Build this executable first.' }
-$run=Join-Path $project ('artifacts/tests/'+$name+'/'+(Get-Date -Format 'yyyyMMdd-HHmmss')+'-'+[guid]::NewGuid().ToString('N'))
+$run=Join-Path $project ('artifacts/tests/'+$name+'/'+[guid]::NewGuid().ToString('N').Substring(0,8))
 New-Item -ItemType Directory -Path $run -Force | Out-Null
 foreach($file in @($OutputName,'AgitCon.ico','Microsoft.Web.WebView2.Core.dll','WebView2Loader.dll')){Copy-Item -LiteralPath (Join-Path $build $file) -Destination (Join-Path $run $file)}
 # Copy only the build's small, hash-verified scripts. Never copy personal data/models/profiles.
@@ -28,7 +28,7 @@ New-Item -ItemType Directory -Path (Join-Path $run 'data') | Out-Null
 foreach($flag in $Flags){
     $task=Start-Process -FilePath (Join-Path $run $OutputName) -ArgumentList $flag -WorkingDirectory $run -WindowStyle Hidden -PassThru
     if(!$task.WaitForExit(30000)){Stop-Process -Id $task.Id -ErrorAction SilentlyContinue;throw ('Test timed out: '+$flag+'; '+$run)}
-    if($task.ExitCode -ne 0){throw ('Test failed: '+$flag+'; '+$run)}
+    if($task.ExitCode -ne 0){$errorFile=Join-Path $run 'app-update-error.txt';if(Test-Path $errorFile){Get-Content $errorFile};throw ('Test failed: '+$flag+'; '+$run)}
 }
 @{Status='PASS';Build=$build;Flags=$Flags;Results=$run} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run 'test-run.json') -Encoding utf8
 Write-Output ('PASS: '+$Flags.Count+' offline tests. Results: '+$run)
