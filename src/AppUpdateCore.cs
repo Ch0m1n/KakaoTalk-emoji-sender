@@ -39,6 +39,7 @@ namespace AgitCon.Updates {
             if(asset.Url!="https://github.com/"+Repository+"/releases/download/"+release.Tag+"/"+AssetName||asset.Size<2||asset.Size>512L*1024*1024||!Regex.IsMatch(asset.Digest??"",@"^sha256:[0-9a-fA-F]{64}$"))throw new InvalidDataException("GitHub 배포 파일의 주소·크기·무결성 정보를 확인하지 못했어요.");return asset;
         }
         static async Task<HttpWebResponse> Open(Uri url,CancellationToken token){
+            ServicePointManager.SecurityProtocol|=SecurityProtocolType.Tls12;
             if(!UrlAllowed(url))throw new InvalidDataException("허용되지 않은 업데이트 주소예요.");
             for(int redirect=0;redirect<6;redirect++){
                 var request=(HttpWebRequest)WebRequest.Create(url);request.AllowAutoRedirect=false;request.UserAgent="KakaoTalk-emoji-sender-Updater";request.Accept="application/vnd.github+json";request.Timeout=20000;request.ReadWriteTimeout=20000;
