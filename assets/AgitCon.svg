@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <title>아지트콘 — 말풍선과 콘</title>
+  <rect x="64" y="18" width="170" height="172" rx="34" fill="#FFFFFF" stroke="#242B2E" stroke-width="8"/>
+  <path d="M54 58H174Q208 58 208 92V182Q208 216 174 216H103L50 242L59 216H54Q20 216 20 182V92Q20 58 54 58Z" fill="#F9DA5B"/>
+  <circle cx="78" cy="119" r="8" fill="#242B2E"/>
+  <circle cx="140" cy="119" r="8" fill="#242B2E"/>
+  <path d="M82 151Q109 177 136 151" stroke="#242B2E" stroke-width="10" stroke-linecap="round"/>
+</svg>

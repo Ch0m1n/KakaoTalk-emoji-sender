@@ -1,0 +1,91 @@
+{
+  "spec": "gemma2-q4-image280-gif3-v1",
+  "revision": "daa72c51243991dfcaf9f9137d2c573d8f7790c0",
+  "sdk": "1.0.4314.35",
+  "files": [
+    {
+      "path": "gemma2/webview2-1.0.4314.35.nupkg",
+      "bytes": 9818548,
+      "sha256": "90778deb1b77e36292828b4b5833c9255c27533f40e0ddd55891ae718944edc4",
+      "required": false
+    },
+    {
+      "path": "gemma2/web/transformers.min.js",
+      "bytes": 586230,
+      "sha256": "8d6716d9086f57c30a4bf367dba61b887593573c770c454465e8019b2703e743",
+      "required": true
+    },
+    {
+      "path": "gemma2/web/ort/ort-wasm-simd-threaded.asyncify.mjs",
+      "bytes": 53057,
+      "sha256": "0966b6105cd936744498aa60df7a22cbd47af3374dbc64a9ab561c08a71e3611",
+      "required": true
+    },
+    {
+      "path": "gemma2/web/ort/ort-wasm-simd-threaded.asyncify.wasm",
+      "bytes": 26861777,
+      "sha256": "49871f5a4409519797e127440868a6d1923339d9185907f301a5b2a1d90af082",
+      "required": true
+    },
+    {
+      "path": "gemma2/web/models/gemma2/config.json",
+      "bytes": 5031,
+      "sha256": "8d011bfe08b5e345bbe0b81e5c6fd02c381920b345b986047bc2a33ce7b90d1d",
+      "required": true
+    },
+    {
+      "path": "gemma2/web/models/gemma2/preprocessor_config.json",
+      "bytes": 560,
+      "sha256": "9344893f8d0573a46ebb2ca54c03f56d044cea194c8dcfb1f4d652240ac21daa",
+      "required": true
+    },
+    {
+      "path": "gemma2/web/models/gemma2/processor_config.json",
+      "bytes": 1788,
+      "sha256": "168f6a08522f3ce5dea596d94d003af2fd691742d4f41fe1f9d8cce76bfbf69c",
+      "required": true
+    },
+    {
+      "path": "gemma2/web/models/gemma2/tokenizer.json",
+      "bytes": 32170510,
+      "sha256": "4d777ef5bdc1aa36227abdfb77c3e49e7b9c892d16e1b6bda41c393504828be4",
+      "required": true
+    },
+    {
+      "path": "gemma2/web/models/gemma2/tokenizer_config.json",
+      "bytes": 1599,
+      "sha256": "17bd5d6e9364ca49a534e1502076593317c298d4a663623091ed45388f004874",
+      "required": true
+    },
+    {
+      "path": "gemma2/web/models/gemma2/onnx/model_q4.onnx",
+      "bytes": 490742,
+      "sha256": "f9eeba97acddf139b8ee2ddf04bc30dceafa88de93fadf74d7644e0d61a477a9",
+      "required": true
+    },
+    {
+      "path": "gemma2/web/models/gemma2/onnx/model_q4.onnx_data",
+      "bytes": 174028800,
+      "sha256": "c3975f2d1ab7a1878ae31a7d7a9b7804a827aff3800b60dfceafce21cac3df49",
+      "required": true
+    },
+    {
+      "path": "gemma2/web/models/gemma2/onnx/vision_encoder_q4.onnx",
+      "bytes": 159400,
+      "sha256": "7ea284226d4938f0ad921ab091f1d80a9ca699aa802984ef5cd5eec4f4761d96",
+      "required": true
+    },
+    {
+      "path": "gemma2/web/models/gemma2/onnx/vision_encoder_q4.onnx_data",
+      "bytes": 108957696,
+      "sha256": "0a9d6c927334f152a33dd90874f65d6ea5228999abe6a450d3f7813677fa704c",
+      "required": true
+    },
+    {
+      "path": "gemma2/MODEL-CARD.md",
+      "bytes": 28720,
+      "sha256": "4fe21bf1b86938ac62c7cd2d1511822e4ea6e8654e015e00b06a72676b5420e6",
+      "required": false
+    }
+  ]
+}

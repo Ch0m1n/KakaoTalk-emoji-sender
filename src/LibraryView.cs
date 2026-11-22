@@ -1,0 +1,315 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
+using System.Drawing;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+
+namespace AgitCon {
+    public sealed class LibraryCell {public Rectangle Bounds;public Entry Entry;public string Header;}
+    public static class LibraryModel {
+        public static List<LibraryCell> RankedLayout(IList<Entry> entries,int width,out int height){var cells=new List<LibraryCell>();int columns=Math.Max(1,width/UiZoom.Px(92)),tileWidth=Math.Max(1,width/columns);cells.Add(new LibraryCell{Header="관련도순 · "+entries.Count+"개",Bounds=new Rectangle(0,0,width,UiZoom.Px(30))});for(int i=0;i<entries.Count;i++)cells.Add(new LibraryCell{Entry=entries[i],Bounds=new Rectangle((i%columns)*tileWidth,UiZoom.Px(30)+(i/columns)*UiZoom.Px(106),tileWidth,UiZoom.Px(106))});height=UiZoom.Px(30)+((entries.Count+columns-1)/columns)*UiZoom.Px(106);return cells;}
+        public static string PackName(Entry entry,IList<PackRecord> packs){var pack=packs.FirstOrDefault(p=>p.Id==entry.PackId);return pack!=null?pack.Title:String.IsNullOrEmpty(entry.PackId)?"로컬 · 개별 콘":entry.PackId;}
+        public static List<Entry> Filter(IEnumerable<Entry> entries,IList<PackRecord> packs,string packId,string query){var tokens=Catalog.Normalize(query).Split(new[]{' ','\t','\r','\n'},StringSplitOptions.RemoveEmptyEntries);return entries.Where(e=>(packId==null||(e.PackId??"")==packId)&&tokens.All(t=>Catalog.Matches(Catalog.Normalize((e.DisplayName??Path.GetFileNameWithoutExtension(e.Path))+" "+e.Aliases+" "+PackName(e,packs)),t))).ToList();}
+        public static List<LibraryCell> Layout(IList<Entry> entries,IList<PackRecord> packs,int width,out int height){var cells=new List<LibraryCell>();int columns=Math.Max(1,width/UiZoom.Px(92)),tileWidth=Math.Max(1,width/columns),y=0;foreach(var group in entries.GroupBy(e=>e.PackId??"")){cells.Add(new LibraryCell{Bounds=new Rectangle(0,y,width,UiZoom.Px(30)),Header=PackName(group.First(),packs)+" · "+group.Count()});y+=UiZoom.Px(30);int index=0;foreach(var entry in group){cells.Add(new LibraryCell{Entry=entry,Bounds=new Rectangle((index%columns)*tileWidth,y+(index/columns)*UiZoom.Px(106),tileWidth,UiZoom.Px(106))});index++;}y+=((index+columns-1)/columns)*UiZoom.Px(106)+UiZoom.Px(12);}height=y;return cells;}
+        public static void Test(){int count=0;Action<bool> check=value=>{if(!value)throw new Exception("Library check "+count);count++;};try{var packs=new List<PackRecord>{new PackRecord{Id="dc",Title="괴렘콘 촉촉팩"},new PackRecord{Id="arca:1",Title="아카 팩"}};var entries=Enumerable.Range(0,128).Select(i=>new Entry{PackId="dc",DisplayName="콘 "+i,Path="x"+i+".png",Aliases=i==100?"고마워요":""}).ToList();entries.Add(new Entry{PackId="arca:1",DisplayName="인사",Path="a.png"});entries.Add(new Entry{DisplayName="로컬",Path="local.gif"});check(Filter(entries,packs,null,"").Count==130);check(Filter(entries,packs,"dc","").Count==128);check(Filter(entries,packs,null,"고맙").Single().DisplayName=="콘 100");check(Filter(entries,packs,null,"촉촉").Count==128);check(Filter(entries,packs,"arca:1","인사").Count==1);check(Filter(entries,packs,"","로컬").Count==1);check(Filter(entries,packs,"arca:1","고맙").Count==0);int height;var cells=Layout(entries,packs,368,out height);check(cells.Count(c=>c.Entry!=null)==130);check(cells.Count(c=>c.Header!=null)==3);check(cells.Where(c=>c.Entry!=null).All(c=>c.Bounds.Width==92));check(cells.All(c=>c.Bounds.Right<=368&&c.Bounds.Bottom<=height));var viewport=new Rectangle(0,0,368,240);check(cells.Count(c=>c.Entry!=null&&c.Bounds.IntersectsWith(viewport))<16);Layout(entries,packs,220,out height);check(height>3500);check(Catalog.Search(entries,"").Count==3);var ranked=new[]{entries[128],entries[0],entries[129],entries[1]};var rankedCells=RankedLayout(ranked,368,out height);check(rankedCells.Where(c=>c.Entry!=null).Select(c=>c.Entry).SequenceEqual(ranked));check(rankedCells.Count(c=>c.Header!=null)==1);check(rankedCells.Where(c=>c.Entry!=null).Take(3).Select(c=>c.Bounds.Left).SequenceEqual(new[]{0,92,184}));File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"library-test.txt"),"PASS: "+count+" library filtering/grouping/viewport checks. No windows, network, clipboard, or input.\r\n");}catch(Exception ex){File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"library-test.txt"),"FAIL: "+ex);Environment.ExitCode=1;}}
+    }
+    // Disk thumbnails survive restarts; these workers never wait for a network slot.
+    static class LocalPreviewWork {
+        static readonly BlockingCollection<Action> work=new BlockingCollection<Action>(),background=new BlockingCollection<Action>(),animations=new BlockingCollection<Action>();
+        static void Start(BlockingCollection<Action> queue,string name,int count){for(int i=0;i<count;i++){var thread=new Thread(()=>{foreach(var action in queue.GetConsumingEnumerable())action();});thread.IsBackground=true;thread.Name=name;thread.Start();}}
+        static LocalPreviewWork(){Start(work,"AgitCon visible posters",2);Start(background,"AgitCon thumbnail preload",1);Start(animations,"AgitCon animated previews",1);}
+        internal static Task<T> Run<T>(Func<T> action,CancellationToken token,bool preload=false,bool animation=false){var done=new TaskCompletionSource<T>();(animation?animations:preload?background:work).Add(()=>{try{token.ThrowIfCancellationRequested();done.TrySetResult(action());}catch(OperationCanceledException){done.TrySetCanceled();}catch(Exception ex){done.TrySetException(ex);}});return done.Task;}
+    }
+    // Shared decoded posters let the UI reuse pixels without disk I/O or a worker round trip.
+    static class SharedPreviews {
+        internal sealed class Item {internal Image Image;internal bool Motion;internal int Uses;internal long Touch,Bytes;}
+        static readonly object sync=new object();static readonly Dictionary<string,Item> images=new Dictionary<string,Item>();static long clock;
+        internal static bool TryAcquire(string key,out Item item){lock(sync){if(!images.TryGetValue(key,out item))return false;item.Uses++;item.Touch=++clock;return true;}}
+        internal static Item Acquire(string path,CancellationToken token){string key=PreviewFiles.Key(path);Item found;if(TryAcquire(key,out found))return found;
+            Image bitmap;try{bitmap=Decode(PreviewFiles.Read(path,false,token,false));}catch(ArgumentException){bitmap=Decode(PreviewFiles.Read(path,false,token,true));}catch(InvalidDataException){bitmap=Decode(PreviewFiles.Read(path,false,token,true));}
+            bool motion;try{motion=GifAttachment.AnimatedGif(path);}catch{bitmap.Dispose();throw;}
+            var created=new Item{Image=bitmap,Bytes=(long)bitmap.Width*bitmap.Height*4,Motion=motion};
+            lock(sync){if(images.TryGetValue(key,out found)){bitmap.Dispose();found.Uses++;found.Touch=++clock;return found;}created.Uses=1;created.Touch=++clock;images[key]=created;Trim();return created;}
+        }
+        static Bitmap Decode(byte[] bytes){using(var stream=new MemoryStream(bytes))using(var encoded=Image.FromStream(stream)){if(encoded.Width>160||encoded.Height>160)throw new InvalidDataException("Poster dimensions");var bitmap=new Bitmap(encoded.Width,encoded.Height,System.Drawing.Imaging.PixelFormat.Format32bppPArgb);try{using(var g=Graphics.FromImage(bitmap)){g.CompositingMode=System.Drawing.Drawing2D.CompositingMode.SourceCopy;g.DrawImage(encoded,new Rectangle(0,0,bitmap.Width,bitmap.Height),0,0,encoded.Width,encoded.Height,GraphicsUnit.Pixel);}return bitmap;}catch{bitmap.Dispose();throw;}}}
+        internal static string Status {get{lock(sync)return images.Count+"개 · "+(images.Values.Sum(i=>i.Bytes)/1048576.0).ToString("0.0")+" / 128 MB";}}
+        internal static void Release(Item item){lock(sync){item.Uses--;Trim();}}
+        static void Trim(){long bytes=images.Values.Sum(i=>i.Bytes);foreach(var pair in images.Where(p=>p.Value.Uses==0).OrderBy(p=>p.Value.Touch).ToArray()){if(images.Count<=1024&&bytes<=128*1024*1024)break;bytes-=pair.Value.Bytes;images.Remove(pair.Key);pair.Value.Image.Dispose();}}
+    }
+    static class PreviewFiles {
+        internal static Task Prepare(Entry entry,CancellationToken token){return Prepare(entry,token,null);}
+        internal static async Task Prepare(Entry entry,CancellationToken token,Action<bool> checkingStored){
+            string path=entry.Path;if(String.IsNullOrEmpty(path)||!File.Exists(path))path=await Task.Run(()=>DcShop.EnsureImage(entry,token),token);
+            string local=path;bool stored=File.Exists(Path.Combine(Folder,Key(local)+".png"));if(checkingStored!=null)checkingStored(stored);
+            await LocalPreviewWork.Run(()=>{if(!stored)Read(local,false,token);var item=SharedPreviews.Acquire(local,token);SharedPreviews.Release(item);return true;},token,preload:true);token.ThrowIfCancellationRequested();entry.Path=path;entry.Format=Path.GetExtension(entry.OriginalPath??path).TrimStart('.');
+        }
+        internal static void TestPackWarmup(){
+            Application.EnableVisualStyles();SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());var context=new ApplicationContext();var timer=new System.Windows.Forms.Timer{Interval=1};
+            timer.Tick+=async(s,e)=>{timer.Stop();string previousRoot=DcShop.CacheRoot,report=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"pack-precache-test.txt");int checks=0;Action<bool> check=b=>{if(!b)throw new Exception("Pack precache check "+checks);checks++;};
+                try{string root=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-work","pack-precache-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);DcShop.CacheRoot=Path.Combine(root,"images");int requests=0;var hits=new Dictionary<string,int>();
+                    DcShop.TestTransport=(uri,body,token,limit,imageOnly)=>{requests++;string key=uri.AbsoluteUri;hits[key]=hits.ContainsKey(key)?hits[key]+1:1;int index=uri.Host=="ac.arca.live"?Int32.Parse(Path.GetFileNameWithoutExtension(uri.AbsolutePath)):Int32.Parse(uri.Query.Substring(4));using(var bitmap=new Bitmap(24,24)){using(var g=Graphics.FromImage(bitmap))g.Clear(Color.FromArgb(255,index*7%255,index*13%255,index*19%255));using(var output=new MemoryStream()){bitmap.Save(output,System.Drawing.Imaging.ImageFormat.Png);return output.ToArray();}}};
+                    Func<List<Entry>> create=()=>Enumerable.Range(1,24).Select(i=>new Entry{PackId=i<=12?"123":"arca:456",RemoteId=i<=12?null:i.ToString(),SourceUrl=i<=12?"https://dcimg5.dcinside.com/dccon.php?no="+i:"https://ac.arca.live/"+i+".png",DisplayName=i.ToString()}).ToList();
+                    int done=0,failed=0;var entries=create();
+                    using(var indexer=new CatalogIndexer(Prepare,(source,copy)=>{source.Path=copy.Path;},(ok,bad)=>{done=ok;failed=bad;},true)){
+                        indexer.Progress=(ok,bad,total)=>{if(ok==8)indexer.Stop();};indexer.Update(entries,true);await indexer.Pending;check(requests==8&&done==0);
+                    }
+                    // Restart with no in-memory paths: durable URL refs must avoid re-downloads.
+                    var resumed=create();using(var indexer=new CatalogIndexer(Prepare,(source,copy)=>{source.Path=copy.Path;},(ok,bad)=>{done=ok;failed=bad;},true)){indexer.Update(resumed,true);await indexer.Pending;}
+                    check(done==24&&failed==0&&requests==24&&hits.Values.All(v=>v==1));check(resumed.All(x=>File.Exists(x.Path)));check(Directory.GetFiles(Folder,"*.png").Length==24);
+                    foreach(var entry in resumed)check(File.Exists(Path.Combine(Folder,Key(entry.Path)+".png")));
+                    using(var indexer=new CatalogIndexer(Prepare,(source,copy)=>{},(ok,bad)=>{done=ok;failed=bad;},true)){indexer.Update(create(),true);await indexer.Pending;}check(done==24&&requests==24);
+                    bool? checking=null;await Prepare(resumed[0],CancellationToken.None,value=>checking=value);check(checking==true&&requests==24);
+                    string storedFile=Path.Combine(Folder,Key(resumed[0].Path)+".png");File.Delete(storedFile);await Prepare(resumed[0],CancellationToken.None,value=>checking=value);check(checking==false&&File.Exists(storedFile)&&requests==24);
+                    var partial=Enumerable.Range(0,3).Select(i=>new Entry{Path=Path.Combine(root,"missing-"+i+".png")}).Concat(new[]{resumed[0]}).ToList();
+                    using(var indexer=new CatalogIndexer(Prepare,(source,copy)=>{},(ok,bad)=>{done=ok;failed=bad;},true)){indexer.Update(partial,true);await indexer.Pending;}check(done==1&&failed==3);
+                    File.WriteAllText(report,"PASS: "+checks+" checks; 24 DC/Arca fixtures fully downloaded and thumbnailed offscreen, interruption after 8 resumed without duplicate downloads, repeated warmup made 0 image requests, 3 failures did not block later images. No AI model, live network, desktop, KakaoTalk, clipboard or input.\r\n");
+                }catch(Exception ex){File.WriteAllText(report,"FAIL: "+ex);Environment.ExitCode=1;}finally{DcShop.TestTransport=null;DcShop.CacheRoot=previousRoot;timer.Dispose();context.ExitThread();}
+            };timer.Start();Application.Run(context);
+        }
+        internal static string Folder {get{return Path.Combine(DcShop.CacheRoot,"thumbs-v1");}}
+        internal static string Key(string path){var info=new FileInfo(path);string value=Path.GetFullPath(path)+"|"+info.Length+"|"+info.LastWriteTimeUtc.Ticks;using(var sha=SHA256.Create())return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(value))).Replace("-","").ToLowerInvariant();}
+        internal static byte[] Read(string path,bool animate,CancellationToken token,bool validate=true){
+            if(animate&&String.Equals(Path.GetExtension(path),".gif",StringComparison.OrdinalIgnoreCase))return File.ReadAllBytes(path);
+            string key=Key(path),file=Path.Combine(Folder,key+".png");
+            if(File.Exists(file))try{var bytes=File.ReadAllBytes(file);if(validate)using(var memory=new MemoryStream(bytes))using(var image=Image.FromStream(memory)){if(image.Width>160||image.Height>160)throw new InvalidDataException("Thumbnail dimensions");}return bytes;}catch{try{File.Delete(file);}catch(IOException){}catch(UnauthorizedAccessException){}}
+            token.ThrowIfCancellationRequested();byte[] encoded;
+            using(var memory=new MemoryStream(File.ReadAllBytes(path)))using(var image=Image.FromStream(memory)){
+                double scale=Math.Min(1,Math.Min(160.0/image.Width,160.0/image.Height));
+                using(var bitmap=new Bitmap(Math.Max(1,(int)(image.Width*scale)),Math.Max(1,(int)(image.Height*scale)),System.Drawing.Imaging.PixelFormat.Format32bppPArgb)){
+                    using(var g=Graphics.FromImage(bitmap)){g.Clear(Color.Transparent);g.InterpolationMode=System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;g.DrawImage(image,new Rectangle(0,0,bitmap.Width,bitmap.Height));}
+                    using(var output=new MemoryStream()){bitmap.Save(output,System.Drawing.Imaging.ImageFormat.Png);encoded=output.ToArray();}
+                }
+            }
+            token.ThrowIfCancellationRequested();string temporary=Path.Combine(Folder,Guid.NewGuid().ToString("N")+".tmp");
+            try{Directory.CreateDirectory(Folder);File.WriteAllBytes(temporary,encoded);try{File.Move(temporary,file);}catch(IOException){if(!File.Exists(file))throw;}}catch(IOException){}catch(UnauthorizedAccessException){}finally{try{if(File.Exists(temporary))File.Delete(temporary);}catch(IOException){}catch(UnauthorizedAccessException){}}return encoded;
+        }
+    }
+    // Virtual tiles: only visible images are fetched; the decoded cache is bounded.
+    public sealed class LibraryGrid:ScrollableControl {
+        public bool Ranked;public Action InteractionStarting;
+        sealed class Thumb:IDisposable {public Image Image;public Stream Stream;public bool Animated,PosterOnly,Motion;public long Bytes;public string SourceKey;public SharedPreviews.Item Shared;public void Dispose(){if(Shared!=null){SharedPreviews.Release(Shared);Shared=null;Image=null;}if(Image!=null){if(Animated)ImageAnimator.StopAnimate(Image,Frame);Image.Dispose();}if(Stream!=null)Stream.Dispose();}public static void Frame(object sender,EventArgs e){} }
+        List<LibraryCell> cells=new List<LibraryCell>();List<Entry> entries=new List<Entry>();IList<PackRecord> packs=new List<PackRecord>();
+        readonly Dictionary<string,Thumb> cache=new Dictionary<string,Thumb>();readonly HashSet<string> pending=new HashSet<string>(),failed=new HashSet<string>(),pendingAnimations=new HashSet<string>();volatile int loadEpoch;Rectangle scheduledView;readonly Dictionary<string,int> retryCounts=new Dictionary<string,int>();readonly Dictionary<string,DateTime> retryTimes=new Dictionary<string,DateTime>();
+        readonly Dictionary<string,string> errors=new Dictionary<string,string>();
+        public string FailureSummary {get{return String.Join("\r\n",errors.Values.Distinct().Take(3));}}
+        CancellationTokenSource requests=new CancellationTokenSource();readonly SemaphoreSlim slots=new SemaphoreSlim(3);readonly System.Windows.Forms.Timer load=new System.Windows.Forms.Timer(),animation=new System.Windows.Forms.Timer();
+        readonly Action<Entry,bool> choose;readonly Action<Entry,Point> menu;readonly Action saved;readonly ToolTip tooltip=new ToolTip();string hovered;Entry pressed;int focused=-1;bool lastRanked;
+        readonly System.Windows.Forms.Timer saveDelay=new System.Windows.Forms.Timer{Interval=350};bool savePending;
+        void QueueSave(){savePending=true;if(!saveDelay.Enabled)saveDelay.Start();}
+        void FlushSave(){saveDelay.Stop();if(savePending){savePending=false;saved();}}
+        public LibraryGrid(Action<Entry,bool> choose,Action<Entry,Point> menu,Action saved){this.choose=choose;this.menu=menu;this.saved=saved;saveDelay.Tick+=(s,e)=>FlushSave();DoubleBuffered=true;AutoScroll=true;BackColor=Ui.Paper;TabStop=true;AccessibleName="보관한 콘 격자";load.Interval=16;load.Tick+=(s,e)=>{load.Stop();LoadVisible();};animation.Interval=100;animation.Tick+=(s,e)=>{if(Visible&&Viewport()!=scheduledView)Schedule();if(Visible&&cache.Values.Any(t=>t.Animated))Invalidate();if(Visible&&retryTimes.Any(p=>p.Value<=DateTime.UtcNow&&cells.Any(c=>c.Entry!=null&&Catalog.Key(c.Entry)==p.Key&&c.Bounds.IntersectsWith(Viewport()))))Schedule();};animation.Start();Scroll+=(s,e)=>{Schedule();QueueViewportRefresh();};SizeChanged+=(s,e)=>Arrange();VisibleChanged+=(s,e)=>{if(Visible)Schedule();else{load.Stop();loadEpoch++;foreach(var key in cache.Keys.Where(k=>cache[k].Animated).ToArray()){cache[key].Dispose();cache.Remove(key);}}};}
+        public void SetItems(List<Entry> items,IList<PackRecord> packList){if(lastRanked==Ranked&&entries.SequenceEqual(items)&&packs.SequenceEqual(packList)){Arrange();return;}lastRanked=Ranked;load.Stop();entries=items;packs=packList;failed.Clear();errors.Clear();retryCounts.Clear();retryTimes.Clear();focused=-1;AutoScrollPosition=Point.Empty;Arrange();}
+        void Arrange(){loadEpoch++;int height;int width=Math.Max(1,ClientSize.Width-SystemInformation.VerticalScrollBarWidth);cells=Ranked?LibraryModel.RankedLayout(entries,width,out height):LibraryModel.Layout(entries,packs,width,out height);AutoScrollMinSize=new Size(0,height);Schedule();Invalidate();}
+        static Thumb SharedThumb(SharedPreviews.Item item,string sourceKey,string path){return new Thumb{Image=item.Image,Shared=item,Motion=item.Motion,PosterOnly=String.Equals(Path.GetExtension(path),".gif",StringComparison.OrdinalIgnoreCase),SourceKey=sourceKey,Bytes=item.Bytes};}
+        bool AdoptMemory(){bool changed=false;var view=Viewport();foreach(var cell in cells.Where(c=>c.Entry!=null&&c.Bounds.IntersectsWith(view))){string key=Catalog.Key(cell.Entry);if(cache.ContainsKey(key)||String.IsNullOrEmpty(cell.Entry.Path)||!File.Exists(cell.Entry.Path))continue;string signature=PreviewFiles.Key(cell.Entry.Path);SharedPreviews.Item item;if(SharedPreviews.TryAcquire(signature,out item)){cache[key]=SharedThumb(item,signature,cell.Entry.Path);changed=true;}}return changed;}
+        bool viewportRefreshQueued;
+        void QueueViewportRefresh(){if(IsDisposed||Disposing||!IsHandleCreated||viewportRefreshQueued)return;viewportRefreshQueued=true;BeginInvoke((Action)(()=>{viewportRefreshQueued=false;if(IsDisposed||Disposing||!Visible)return;Schedule();Invalidate();}));}
+        void Schedule(){if(IsDisposed||!Visible)return;var view=Viewport();bool changed=view!=scheduledView;if(changed){var previous=scheduledView;scheduledView=view;loadEpoch++;foreach(var cell in cells.Where(c=>c.Entry!=null&&c.Bounds.IntersectsWith(view)&&!c.Bounds.IntersectsWith(previous))){string key=Catalog.Key(cell.Entry);failed.Remove(key);retryCounts.Remove(key);retryTimes.Remove(key);}}bool adopted=AdoptMemory();if(changed||adopted)QueueViewportRefresh();if(!load.Enabled)load.Start();}
+        protected override void WndProc(ref Message message){int kind=message.Msg;base.WndProc(ref message);if(kind==0x114||kind==0x115||kind==0x20A||kind==0x20E)QueueViewportRefresh();}
+        Rectangle Viewport(){return new Rectangle(-AutoScrollPosition.X,-AutoScrollPosition.Y,ClientSize.Width,ClientSize.Height);}
+        bool Near(Entry entry){var area=Viewport();area.Inflate(0,212);return cells.Any(c=>c.Entry==entry&&c.Bounds.IntersectsWith(area));}
+        void LoadVisible(){
+            if(!Visible||IsDisposed)return;var view=Viewport();var near=view;near.Inflate(0,212);
+            var wanted=cells.Where(c=>c.Entry!=null&&c.Bounds.IntersectsWith(near)).OrderBy(c=>!c.Bounds.IntersectsWith(view)).ToList();
+            var visibleKeys=new HashSet<string>(wanted.Where(c=>c.Bounds.IntersectsWith(view)).Select(c=>Catalog.Key(c.Entry)));
+            foreach(var key in cache.Keys.Where(k=>cache[k].Animated&&!visibleKeys.Contains(k)).ToArray()){cache[key].Dispose();cache.Remove(key);}if(AdoptMemory())QueueViewportRefresh();
+            bool postersReady=visibleKeys.All(k=>cache.ContainsKey(k));
+            var keep=new HashSet<string>(wanted.Select(c=>Catalog.Key(c.Entry)));long bytes=cache.Values.Sum(t=>t.Bytes);
+            foreach(var key in cache.Keys.Where(k=>!keep.Contains(k)).ToArray()){if(cache.Count<=96&&bytes<=32*1024*1024)break;bytes-=cache[key].Bytes;cache[key].Dispose();cache.Remove(key);}
+            foreach(var cell in wanted){bool visible=cell.Bounds.IntersectsWith(view),local=!String.IsNullOrEmpty(cell.Entry.Path)&&File.Exists(cell.Entry.Path);if(!visible&&!local)continue;
+                string key=Catalog.Key(cell.Entry);DateTime retry;if(failed.Contains(key)&&retryTimes.TryGetValue(key,out retry)&&retry<=DateTime.UtcNow){failed.Remove(key);retryTimes.Remove(key);}Thumb existing;bool upgrade=cache.TryGetValue(key,out existing)&&((existing.PosterOnly&&visible&&postersReady&&cache.Values.Count(t=>t.Animated)+pendingAnimations.Count<2)||(local&&existing.SourceKey!=PreviewFiles.Key(cell.Entry.Path)));
+                if((existing==null||upgrade)&&!failed.Contains(key)&&pending.Add(key)){bool motion=existing!=null&&existing.PosterOnly&&visible;if(motion)pendingAnimations.Add(key);LoadThumb(cell.Entry,key,motion,requests.Token);}
+            }
+        }
+        async void LoadThumb(Entry entry,string key,bool animate,CancellationToken token){int epoch=loadEpoch;bool acquired=false;try{
+            string path=entry.Path;
+            if(String.IsNullOrEmpty(path)||!File.Exists(path)){await slots.WaitAsync(token);acquired=true;if(token.IsCancellationRequested||!Near(entry))return;path=await Task.Run(()=>DcShop.EnsureImage(entry,token),token);}
+            string local=path;var thumb=await LocalPreviewWork.Run(()=>{if(epoch!=loadEpoch)return null;
+                if(!animate||!String.Equals(Path.GetExtension(local),".gif",StringComparison.OrdinalIgnoreCase)){var shared=SharedPreviews.Acquire(local,token);return SharedThumb(shared,PreviewFiles.Key(local),local);}
+                var bytes=PreviewFiles.Read(local,animate,token);var decoded=new Thumb{Stream=new MemoryStream(bytes),SourceKey=PreviewFiles.Key(local),PosterOnly=!animate&&String.Equals(Path.GetExtension(local),".gif",StringComparison.OrdinalIgnoreCase)};
+                try{decoded.Image=Image.FromStream(decoded.Stream);decoded.Animated=ImageAnimator.CanAnimate(decoded.Image);decoded.Motion=decoded.Animated||(decoded.PosterOnly&&GifAttachment.AnimatedGif(local));int frames=decoded.Animated?decoded.Image.GetFrameCount(System.Drawing.Imaging.FrameDimension.Time):1;decoded.Bytes=bytes.Length+(long)decoded.Image.Width*decoded.Image.Height*4*Math.Max(1,frames);return decoded;}catch{decoded.Dispose();throw;}
+            },token,animation:animate);
+            if(thumb==null)return;if(token.IsCancellationRequested||IsDisposed||epoch!=loadEpoch){thumb.Dispose();return;}
+            if(thumb.Animated)ImageAnimator.Animate(thumb.Image,Thumb.Frame);Thumb previous;if(cache.TryGetValue(key,out previous))previous.Dispose();cache[key]=thumb;failed.Remove(key);errors.Remove(key);retryCounts.Remove(key);retryTimes.Remove(key);
+            bool changed=entry.Path!=path;entry.Path=path;if(changed)QueueSave();Invalidate();
+        }catch(Exception ex){if(!token.IsCancellationRequested&&!IsDisposed){failed.Add(key);int attempt;retryCounts.TryGetValue(key,out attempt);retryCounts[key]=++attempt;if(attempt<3)retryTimes[key]=DateTime.UtcNow.AddMilliseconds(500*Math.Pow(2,attempt-1));errors[key]=ex.GetType().Name+": "+ex.Message;Invalidate();}}finally{if(acquired)slots.Release();pending.Remove(key);pendingAnimations.Remove(key);if(!IsDisposed&&Visible)Schedule();}}
+        internal static void TestPersistentCache(){
+            string report=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"thumbnail-cache-test.txt"),previousRoot=DcShop.CacheRoot;
+            string root=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-work","persistent-thumb-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);int checks=0;Action<bool> check=b=>{if(!b)throw new Exception("Thumbnail cache check "+checks);checks++;};
+            try{DcShop.CacheRoot=Path.Combine(root,"cache");string source=Path.Combine(root,"source.png");using(var bitmap=new Bitmap(320,240)){using(var g=Graphics.FromImage(bitmap)){g.Clear(Color.Transparent);g.FillRectangle(Brushes.Red,10,10,100,100);}bitmap.Save(source);}
+                byte[] first=PreviewFiles.Read(source,false,CancellationToken.None);string key=PreviewFiles.Key(source),file=Path.Combine(PreviewFiles.Folder,key+".png");check(File.Exists(file));DateTime stamp=File.GetLastWriteTimeUtc(file);var again=PreviewFiles.Read(source,false,CancellationToken.None);check(first.SequenceEqual(again)&&File.GetLastWriteTimeUtc(file)==stamp);
+                using(var memory=new MemoryStream(first))using(var image=new Bitmap(memory)){check(image.Width==160&&image.Height==120);check(image.GetPixel(159,119).A==0);}
+                File.WriteAllBytes(file,new byte[]{1,2,3});check(PreviewFiles.Read(source,false,CancellationToken.None).SequenceEqual(first));
+                File.SetLastWriteTimeUtc(source,File.GetLastWriteTimeUtc(source).AddSeconds(2));check(PreviewFiles.Key(source)!=key);PreviewFiles.Read(source,false,CancellationToken.None);check(File.Exists(Path.Combine(PreviewFiles.Folder,PreviewFiles.Key(source)+".png")));
+                string gif=Path.Combine(root,"animated.gif");byte[] original=new byte[]{71,73,70,56,57,97,1,0,1,0,128,0,0,0,0,0,255,255,255,33,249,4,0,10,0,0,0,44,0,0,0,0,1,0,1,0,0,2,2,68,1,0,33,249,4,0,10,0,0,0,44,0,0,0,0,1,0,1,0,0,2,2,76,1,0,59};File.WriteAllBytes(gif,original);
+                using(var memory=new MemoryStream(PreviewFiles.Read(gif,false,CancellationToken.None)))using(var image=Image.FromStream(memory))check(!ImageAnimator.CanAnimate(image));
+                var animated=PreviewFiles.Read(gif,true,CancellationToken.None);check(animated.SequenceEqual(original));using(var memory=new MemoryStream(animated))using(var image=Image.FromStream(memory))check(image.GetFrameCount(System.Drawing.Imaging.FrameDimension.Time)==2);
+                using(var grid=new LibraryGrid((e,b)=>{},(e,p)=>{},()=>{})){
+                    grid.Size=new Size(100,130);grid.CreateControl();var gifEntry=new Entry{Path=gif,DisplayName="animation"};grid.SetItems(new List<Entry>{new Entry{Path=source,DisplayName="first"},gifEntry},new List<PackRecord>());var clock=System.Diagnostics.Stopwatch.StartNew();string gifKey=Catalog.Key(gifEntry);
+                    while(!grid.cache.ContainsKey(gifKey)&&clock.ElapsedMilliseconds<2000){Application.DoEvents();Thread.Sleep(1);}check(grid.cache.ContainsKey(gifKey)&&grid.cache[gifKey].PosterOnly&&grid.cache[gifKey].Motion);
+                    grid.AutoScrollPosition=new Point(0,136);grid.Schedule();clock.Restart();while((grid.cache[gifKey].PosterOnly||!grid.cache[gifKey].Animated)&&clock.ElapsedMilliseconds<2000){Application.DoEvents();Thread.Sleep(1);}check(grid.cache[gifKey].Animated&&!grid.cache[gifKey].PosterOnly&&grid.cache[gifKey].Motion);
+                }
+                var sharedWarm=SharedPreviews.Acquire(source,CancellationToken.None);SharedPreviews.Release(sharedWarm);
+                using(var firstGrid=new LibraryGrid((e,b)=>{},(e,p)=>{},()=>{}))using(var nextGrid=new LibraryGrid((e,b)=>{},(e,p)=>{},()=>{})){
+                    firstGrid.Size=nextGrid.Size=new Size(200,160);firstGrid.CreateControl();nextGrid.CreateControl();var entry=new Entry{Path=source};var items=new List<Entry>{entry};firstGrid.SetItems(items,new List<PackRecord>());nextGrid.SetItems(items,new List<PackRecord>());string sourceKey=Catalog.Key(entry);
+                    check(firstGrid.cache.ContainsKey(sourceKey)&&nextGrid.cache.ContainsKey(sourceKey));check(Object.ReferenceEquals(firstGrid.cache[sourceKey].Image,nextGrid.cache[sourceKey].Image));firstGrid.Dispose();using(var bitmap=new Bitmap(200,160))nextGrid.DrawToBitmap(bitmap,nextGrid.ClientRectangle);check(nextGrid.cache[sourceKey].Image.Width==160);
+                }
+                // A blocked remote transfer must not occupy local decoding workers.
+                var started=new ManualResetEventSlim(false);var release=new ManualResetEventSlim(false);DcShop.TestTransport=(uri,body,token,limit,imageOnly)=>{started.Set();while(!release.Wait(10))token.ThrowIfCancellationRequested();return File.ReadAllBytes(source);};
+                using(var grid=new LibraryGrid((e,b)=>{},(e,p)=>{},()=>{})){
+                    grid.Size=new Size(400,440);grid.CreateControl();var remote=new Entry{PackId="test",SourceUrl="https://dcimg5.dcinside.com/dccon.php?no=abcdef",DisplayName="remote"};var local=new Entry{Path=source,DisplayName="local"};var all=new List<Entry>{remote,local};
+                    try{grid.SetItems(all,new List<PackRecord>());var clock=System.Diagnostics.Stopwatch.StartNew();while((!started.IsSet||!grid.cache.ContainsKey(Catalog.Key(local)))&&clock.ElapsedMilliseconds<2000){Application.DoEvents();Thread.Sleep(1);}check(started.IsSet&&grid.cache.ContainsKey(Catalog.Key(local))&&!grid.cache.ContainsKey(Catalog.Key(remote)));grid.SetItems(new List<Entry>{local},new List<PackRecord>());check(grid.cache.ContainsKey(Catalog.Key(local)));}
+                    finally{release.Set();var deadline=System.Diagnostics.Stopwatch.StartNew();while(grid.pending.Count>0&&deadline.ElapsedMilliseconds<3000){Application.DoEvents();Thread.Sleep(1);}}
+                    check(File.ReadAllBytes(source).Length>0&&File.ReadAllBytes(gif).SequenceEqual(original));
+                }
+                File.WriteAllText(report,"PASS: "+checks+" persistent thumbnail reuse, source-change invalidation, corrupt-cache recovery, alpha/size, two-frame GIF preservation, blocked-remote/local independence and view-switch reuse checks. Synthetic transport only; no network, desktop, KakaoTalk, clipboard or input.\r\n");
+            }catch(Exception ex){File.WriteAllText(report,"FAIL: "+ex);Environment.ExitCode=1;}finally{DcShop.TestTransport=null;DcShop.CacheRoot=previousRoot;}
+        }
+        internal static void TestRecovery(){string previous=DcShop.CacheRoot,oldCatalog=Catalog.DataPath,report=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"thumbnail-recovery-test.txt");string root=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-work","recovery-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);int checks=0;Action<bool> check=value=>{if(!value)throw new Exception("Recovery check "+checks);checks++;};Action<Func<bool>> wait=condition=>{var clock=System.Diagnostics.Stopwatch.StartNew();while(!condition()&&clock.ElapsedMilliseconds<6000){Application.DoEvents();Thread.Sleep(1);}check(condition());};
+            try{DcShop.CacheRoot=Path.Combine(root,"cache");Catalog.DataPath=Path.Combine(root,"catalog.json");check(Catalog.Load().PreloadThumbnails==null);var settings=new Settings{PreloadThumbnails=false};Catalog.Save(settings);check(Catalog.Load().PreloadThumbnails==false);settings.PreloadThumbnails=true;Catalog.Save(settings);check(Catalog.Load().PreloadThumbnails==true);
+                string image=Path.Combine(root,"source.png");using(var bitmap=new Bitmap(32,24)){using(var g=Graphics.FromImage(bitmap))g.Clear(Color.Coral);bitmap.Save(image);}byte[] encoded=File.ReadAllBytes(image);var entries=new List<Entry>();for(int i=0;i<192;i++){string path=Path.Combine(root,"image-"+i+".png");File.WriteAllBytes(path,encoded);entries.Add(new Entry{Path=path});}
+                var first=SharedPreviews.Acquire(entries[0].Path,CancellationToken.None);SharedPreviews.Release(first);foreach(var entry in entries.Skip(1)){var item=SharedPreviews.Acquire(entry.Path,CancellationToken.None);SharedPreviews.Release(item);}var retained=SharedPreviews.Acquire(entries[0].Path,CancellationToken.None);check(Object.ReferenceEquals(first.Image,retained.Image));SharedPreviews.Release(retained);
+                using(var started=new ManualResetEventSlim())using(var release=new ManualResetEventSlim()){var background=LocalPreviewWork.Run(()=>{started.Set();release.Wait();return 1;},CancellationToken.None,preload:true);try{check(started.Wait(2000));var foreground=LocalPreviewWork.Run(()=>2,CancellationToken.None);wait(()=>foreground.IsCompleted);check(foreground.Result==2&&!background.IsCompleted);}finally{release.Set();background.GetAwaiter().GetResult();}}
+                using(var grid=new LibraryGrid((e,b)=>{},(e,p)=>{},()=>{})){grid.Size=new Size(300,230);grid.CreateControl();grid.SetItems(entries.Take(48).ToList(),new List<PackRecord>());wait(()=>grid.cache.ContainsKey(Catalog.Key(entries[0])));grid.AutoScrollPosition=new Point(0,grid.cells.Last().Bounds.Top);using(var bitmap=new Bitmap(grid.Width,grid.Height))grid.DrawToBitmap(bitmap,grid.ClientRectangle);wait(()=>grid.cache.ContainsKey(Catalog.Key(entries[47])));for(int i=0;i<10;i++){grid.AutoScrollPosition=new Point(0,i%2==0?0:grid.cells.Last().Bounds.Top);using(var bitmap=new Bitmap(grid.Width,grid.Height))grid.DrawToBitmap(bitmap,grid.ClientRectangle);}wait(()=>grid.cells.Where(c=>c.Entry!=null&&c.Bounds.IntersectsWith(grid.Viewport())).All(c=>grid.cache.ContainsKey(Catalog.Key(c.Entry))));}
+                int requests=0;DcShop.TestTransport=(uri,body,token,limit,imageOnly)=>{if(++requests==1)throw new IOException("Temporary fixture failure");return encoded;};using(var grid=new LibraryGrid((e,b)=>{},(e,p)=>{},()=>{})){grid.Size=new Size(200,160);grid.CreateControl();var entry=new Entry{PackId="fixture",SourceUrl="https://dcimg5.dcinside.com/dccon.php?no=abcdef1234"};grid.SetItems(new List<Entry>{entry},new List<PackRecord>());wait(()=>grid.cache.ContainsKey(Catalog.Key(entry)));check(requests==2&&!grid.failed.Contains(Catalog.Key(entry)));}
+                requests=0;DcShop.TestTransport=(uri,body,token,limit,imageOnly)=>{requests++;throw new IOException("Persistent fixture failure");};using(var grid=new LibraryGrid((e,b)=>{},(e,p)=>{},()=>{})){grid.Size=new Size(200,160);grid.CreateControl();var entry=new Entry{PackId="fixture",SourceUrl="https://dcimg5.dcinside.com/dccon.php?no=abcdef5678"};grid.SetItems(new List<Entry>{entry},new List<PackRecord>());wait(()=>requests==3);var clock=System.Diagnostics.Stopwatch.StartNew();while(clock.ElapsedMilliseconds<400){Application.DoEvents();Thread.Sleep(1);}check(requests==3);}
+                File.WriteAllText(report,"PASS: "+checks+" cases: nullable/false/true preload persistence, 192 decoded posters retained, foreground independent of blocked preload, paint-detected programmatic scroll without refresh, rapid scroll recovery, transient failure automatic retry and persistent failure limited to 3 attempts. Synthetic transport; no network, Kakao, clipboard or input.");
+            }catch(Exception ex){File.WriteAllText(report,"FAIL: "+ex);Environment.ExitCode=1;}finally{DcShop.TestTransport=null;DcShop.CacheRoot=previous;Catalog.DataPath=oldCatalog;}}
+        internal static void RenderMotionBadge(){
+            var config=Catalog.Load();string gif=Directory.EnumerateFiles(DcShop.CacheRoot,"*.gif",SearchOption.AllDirectories).First(path=>GifAttachment.AnimatedGif(path));var still=config.Entries.First(e=>!String.IsNullOrEmpty(e.Path)&&File.Exists(e.Path)&&Path.GetExtension(e.Path)==".png");
+            using(var grid=new LibraryGrid((e,b)=>{},(e,p)=>{},()=>{})){grid.Ranked=true;grid.Size=new Size(320,180);grid.CreateControl();grid.SetItems(new List<Entry>{new Entry{Path=gif,DisplayName="움직이는 콘"},still},new List<PackRecord>());var clock=System.Diagnostics.Stopwatch.StartNew();while(grid.cache.Count<2&&clock.ElapsedMilliseconds<3000){Application.DoEvents();Thread.Sleep(5);}using(var bitmap=new Bitmap(grid.Width,grid.Height)){grid.DrawToBitmap(bitmap,grid.ClientRectangle);bitmap.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"motion-badge-preview.png"));}}
+        }
+        internal static void TestCacheSpeed(bool prepared=false){
+            string report=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,prepared?"library-memory-speed.txt":"library-cache-speed.txt");
+            try{var config=Catalog.Load();var source=config.Entries.Where(e=>!String.IsNullOrEmpty(e.Path)&&File.Exists(e.Path)).Take(84).ToList();if(source.Count<12)throw new Exception("Need 12 cached local stickers");
+                if(prepared)foreach(var entry in source){var preparing=PreviewFiles.Prepare(entry,CancellationToken.None);while(!preparing.IsCompleted){Application.DoEvents();Thread.Sleep(1);}preparing.GetAwaiter().GetResult();}
+                using(var grid=new LibraryGrid((e,b)=>{},(e,p)=>{},()=>{})){grid.Size=new Size(380,440);grid.CreateControl();var clock=System.Diagnostics.Stopwatch.StartNew();
+                    Func<bool> ready=()=>grid.cells.Where(c=>c.Entry!=null&&c.Bounds.IntersectsWith(grid.Viewport())).All(c=>grid.cache.ContainsKey(Catalog.Key(c.Entry)));
+                    Action wait=()=>{var timeout=System.Diagnostics.Stopwatch.StartNew();while(!ready()&&timeout.ElapsedMilliseconds<5000){Application.DoEvents();Thread.Sleep(1);}if(!ready())throw new Exception("Visible thumbnails did not complete");};
+                    grid.SetItems(source,config.Packs);wait();long first=clock.ElapsedMilliseconds;
+                    clock.Restart();grid.AutoScrollPosition=new Point(0,grid.cells.Last().Bounds.Top);grid.Schedule();wait();long bottom=clock.ElapsedMilliseconds;
+                    clock.Restart();grid.AutoScrollPosition=Point.Empty;grid.Schedule();wait();long back=clock.ElapsedMilliseconds;
+                    grid.Visible=false;grid.Visible=true;clock.Restart();wait();long show=clock.ElapsedMilliseconds;
+                    File.WriteAllText(report,"PASS: "+(prepared?"prewarmed memory; ":"")+"actual cached local stickers="+source.Count+"; first viewport ms="+first+"; scroll-to-last ms="+bottom+"; return-to-first ms="+back+"; hide/show ms="+show+". Offscreen only; no network, KakaoTalk, draft reading, clipboard or input.\r\n");
+                }
+            }catch(Exception ex){File.WriteAllText(report,"FAIL: "+ex);Environment.ExitCode=1;}
+        }
+        internal static void TestLoading(){
+            string root=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-work","thumb-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);int saves=0;
+            try{var items=new List<Entry>();for(int i=0;i<12;i++){string path=Path.Combine(root,i+".png");using(var bitmap=new Bitmap(128,128)){using(var g=Graphics.FromImage(bitmap))g.Clear(Color.FromArgb(255,i*15,100,80));bitmap.Save(path);}items.Add(new Entry{Path=path,DisplayName=i.ToString()});}
+                using(var grid=new LibraryGrid((e,shift)=>{},(e,point)=>{},()=>saves++)){
+                    grid.Size=new Size(400,450);grid.CreateControl();var packs=new List<PackRecord>();var clock=System.Diagnostics.Stopwatch.StartNew();grid.SetItems(items,packs);
+                    while(grid.cache.Count<12&&clock.ElapsedMilliseconds<5000){grid.SetItems(items.ToList(),packs);Application.DoEvents();Thread.Sleep(10);}
+                    if(grid.cache.Count!=12||saves!=0)throw new Exception("Cached thumbnails failed or wrote unchanged catalog");long cold=clock.ElapsedMilliseconds;var references=grid.cache.ToDictionary(p=>p.Key,p=>p.Value);clock.Restart();
+                    for(int i=0;i<20;i++){grid.SetItems(items.ToList(),packs);Application.DoEvents();}
+                    while(clock.ElapsedMilliseconds<150){Application.DoEvents();Thread.Sleep(5);}
+                    if(references.Any(p=>!Object.ReferenceEquals(p.Value,grid.cache[p.Key]))||saves!=0)throw new Exception("Warm thumbnails redecoded or saved");
+                    File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"library-load-test.txt"),"PASS: 12 cached thumbnails loaded despite repeated identical refreshes; first ms="+cold+", 20 warm refreshes including 150ms observation, ms="+clock.ElapsedMilliseconds+"; decoded images reused; unchanged catalog writes=0. Offscreen control only; no network, KakaoTalk, clipboard or input.\r\n");
+                }
+            }catch(Exception ex){File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"library-load-test.txt"),"FAIL: "+ex);Environment.ExitCode=1;}
+        }
+        internal static void TestScrollRepaint(){string report=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"scroll-repaint-test.txt"),previous=DcShop.CacheRoot;int checks=0;Action<bool> check=value=>{if(!value)throw new Exception("Scroll repaint check "+checks);checks++;};try{
+            string root=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-work","scroll-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);DcShop.CacheRoot=Path.Combine(root,"cache");var items=new List<Entry>();
+            for(int i=0;i<60;i++){string path=Path.Combine(root,i+".png");using(var image=new Bitmap(20,20)){using(var graphics=Graphics.FromImage(image))graphics.Clear(Color.FromArgb(255,i*3,80,150));image.Save(path);}var shared=SharedPreviews.Acquire(path,CancellationToken.None);SharedPreviews.Release(shared);items.Add(new Entry{Path=path});}
+            using(var grid=new LibraryGrid((e,s)=>{},(e,p)=>{},()=>{})){grid.Size=new Size(210,220);grid.CreateControl();grid.SetItems(items,new List<PackRecord>());Application.DoEvents();grid.load.Stop();
+                foreach(int row in new[]{8,18,4,24,0}){
+                    grid.AutoScrollPosition=new Point(0,row*106);grid.load.Stop();bool full=false,marker=false,paintedBeforeMarker=false;grid.Invalidated+=(s,e)=>{if(e.InvalidRect.Contains(grid.ClientRectangle))full=true;};
+                    // Native scrolling may repaint only the exposed strip, keeping copied placeholders.
+                    using(var surface=new Bitmap(grid.Width,grid.Height))using(var graphics=Graphics.FromImage(surface)){var strip=new Rectangle(0,grid.Height-5,grid.Width,5);graphics.SetClip(strip);grid.OnPaint(new PaintEventArgs(graphics,strip));}
+                    check(grid.cells.Where(c=>c.Entry!=null&&c.Bounds.IntersectsWith(grid.Viewport())).All(c=>grid.cache.ContainsKey(Catalog.Key(c.Entry))));
+                    grid.BeginInvoke((Action)(()=>{paintedBeforeMarker=full;marker=true;}));var clock=System.Diagnostics.Stopwatch.StartNew();while(!marker&&clock.ElapsedMilliseconds<1500){Application.DoEvents();Thread.Sleep(1);}check(marker&&paintedBeforeMarker);
+                }
+            }
+            File.WriteAllText(report,"PASS: "+checks+" cached-scroll cases, exposed-strip paint followed by deferred full viewport invalidation, alternating forward/backward scroll with no resize/refresh/download. Own controls and synthetic images only; no Kakao, clipboard or external input.");
+        }catch(Exception ex){File.WriteAllText(report,"FAIL: "+ex);Environment.ExitCode=1;}finally{DcShop.CacheRoot=previous;}}
+        public void NotifyPrepared(Entry entry){string key=Catalog.Key(entry);failed.Remove(key);errors.Remove(key);retryCounts.Remove(key);retryTimes.Remove(key);if(Near(entry)){Schedule();Invalidate();}}
+        protected override void OnMouseWheel(MouseEventArgs e){base.OnMouseWheel(e);Schedule();Invalidate();}
+        protected override void OnPaint(PaintEventArgs e){
+            var view=Viewport();if(view!=scheduledView)Schedule();base.OnPaint(e);
+            if(entries.Count==0){TextRenderer.DrawText(e.Graphics,"표시할 콘이 없어요.\n다른 팩이나 검색어로 찾아보세요.",Font,ClientRectangle,Ui.Muted,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);return;}
+            foreach(var cell in cells.Where(c=>c.Bounds.IntersectsWith(view))){
+                var r=cell.Bounds;r.Offset(AutoScrollPosition);
+                if(cell.Header!=null){using(var font=Ui.Bold(9))TextRenderer.DrawText(e.Graphics,cell.Header,font,new Rectangle(r.X+UiZoom.Px(6),r.Y+UiZoom.Px(4),r.Width-UiZoom.Px(12),UiZoom.Px(22)),Ui.Ink,TextFormatFlags.EndEllipsis|TextFormatFlags.VerticalCenter);continue;}
+                var entry=cell.Entry;string key=Catalog.Key(entry);bool over=hovered==key;
+                var imageRect=new Rectangle(r.X+UiZoom.Px(5),r.Y+UiZoom.Px(3),Math.Max(1,r.Width-UiZoom.Px(10)),UiZoom.Px(84));
+                e.Graphics.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                using(var shape=Ui.Round(imageRect,9)){using(var brush=new SolidBrush(over?Ui.Soft:Ui.Surface))e.Graphics.FillPath(brush,shape);if(over)using(var pen=new Pen(Ui.Line))e.Graphics.DrawPath(pen,shape);}
+                Thumb thumb;
+                if(cache.TryGetValue(key,out thumb)){
+                    if(thumb.Animated)ImageAnimator.UpdateFrames(thumb.Image);
+                    double scale=Math.Min((double)(imageRect.Width-UiZoom.Px(8))/thumb.Image.Width,(double)(imageRect.Height-UiZoom.Px(8))/thumb.Image.Height);
+                    int w=Math.Max(1,(int)(thumb.Image.Width*scale)),h=Math.Max(1,(int)(thumb.Image.Height*scale));
+                    e.Graphics.DrawImage(thumb.Image,new Rectangle(imageRect.X+(imageRect.Width-w)/2,imageRect.Y+(imageRect.Height-h)/2,w,h));
+                    if(thumb.Motion){var badge=new Rectangle(imageRect.Right-UiZoom.Px(37),imageRect.Top+UiZoom.Px(4),UiZoom.Px(33),UiZoom.Px(18));using(var shape=Ui.Round(badge,4))using(var brush=new SolidBrush(Color.FromArgb(235,Ui.Ink)))e.Graphics.FillPath(brush,shape);using(var font=Ui.Bold(7))TextRenderer.DrawText(e.Graphics,"움짤",font,badge,Color.White,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);}
+                }else{
+                    using(var brush=new SolidBrush(Ui.Soft))e.Graphics.FillRectangle(brush,new Rectangle(imageRect.X+UiZoom.Px(16),imageRect.Y+UiZoom.Px(23),Math.Max(8,imageRect.Width-UiZoom.Px(32)),UiZoom.Px(32)));
+                    if(failed.Contains(key))using(var font=Ui.Regular(8))TextRenderer.DrawText(e.Graphics,retryTimes.ContainsKey(key)?"잠시 후 재시도":"불러오기 실패",font,imageRect,Ui.Muted,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);
+                }
+                if(Ranked){int rank=entries.IndexOf(entry);if(rank<3){var badge=new Rectangle(imageRect.Left+UiZoom.Px(2),imageRect.Bottom-UiZoom.Px(17),UiZoom.Px(42),UiZoom.Px(15));using(var brush=new SolidBrush(Ui.Accent))e.Graphics.FillRectangle(brush,badge);using(var font=Ui.Bold(7))TextRenderer.DrawText(e.Graphics,"Alt+"+(rank+1),font,badge,Ui.Ink,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);}}
+                string name=entry.DisplayName??Path.GetFileNameWithoutExtension(entry.Path);int number;
+                if(over||!Int32.TryParse(name,out number))using(var font=Ui.Regular(8))TextRenderer.DrawText(e.Graphics,name,font,new Rectangle(r.X+UiZoom.Px(4),r.Y+UiZoom.Px(89),r.Width-UiZoom.Px(8),UiZoom.Px(17)),Ui.Muted,TextFormatFlags.HorizontalCenter|TextFormatFlags.EndEllipsis);
+                if(Focused&&focused==entries.IndexOf(entry))ControlPaint.DrawFocusRectangle(e.Graphics,imageRect);
+            }
+        }
+        LibraryCell Hit(Point point){point.Offset(-AutoScrollPosition.X,-AutoScrollPosition.Y);return cells.FirstOrDefault(c=>c.Entry!=null&&c.Bounds.Contains(point));}
+        protected override void OnMouseMove(MouseEventArgs e){base.OnMouseMove(e);var hit=Hit(e.Location);string key=hit==null?null:Catalog.Key(hit.Entry);if(hovered!=key){hovered=key;tooltip.SetToolTip(this,hit==null?"":(hit.Entry.DisplayName??Path.GetFileName(hit.Entry.Path))+"\n"+hit.Entry.Aliases+(errors.ContainsKey(key)?"\n"+errors[key]:"")+"\n클릭: 선택 · 우클릭: 파일 복사");Invalidate();}}
+        protected override void OnMouseLeave(EventArgs e){base.OnMouseLeave(e);hovered=null;Invalidate();}
+        protected override void OnMouseDown(MouseEventArgs e){if(InteractionStarting!=null)InteractionStarting();base.OnMouseDown(e);var hit=Hit(e.Location);pressed=hit==null?null:hit.Entry;if(hit==null)return;var owner=FindForm();if(owner!=null&&owner.Visible)owner.Activate();Focus();focused=entries.IndexOf(hit.Entry);Invalidate();}
+        protected override void OnMouseUp(MouseEventArgs e){base.OnMouseUp(e);var hit=Hit(e.Location);var entry=pressed;pressed=null;if(entry==null||hit==null||hit.Entry!=entry)return;if(e.Button==MouseButtons.Left)choose(entry,(ModifierKeys&Keys.Shift)!=0);else if(e.Button==MouseButtons.Right)menu(entry,PointToScreen(e.Location));}
+        protected override bool IsInputKey(Keys keyData){var key=keyData&Keys.KeyCode;return key==Keys.Left||key==Keys.Right||key==Keys.Up||key==Keys.Down||base.IsInputKey(keyData);}
+        protected override void OnKeyDown(KeyEventArgs e){base.OnKeyDown(e);if(entries.Count==0)return;int cols=Math.Max(1,(ClientSize.Width-SystemInformation.VerticalScrollBarWidth)/92),delta=e.KeyCode==Keys.Left?-1:e.KeyCode==Keys.Right?1:e.KeyCode==Keys.Up?-cols:e.KeyCode==Keys.Down?cols:0;if(delta!=0){focused=Math.Max(0,Math.Min(entries.Count-1,(focused<0?0:focused)+delta));var cell=cells.First(c=>c.Entry==entries[focused]);if(!Viewport().Contains(cell.Bounds)){AutoScrollPosition=new Point(0,cell.Bounds.Top);Schedule();}Invalidate();e.Handled=true;}else if(e.KeyCode==Keys.Enter||e.KeyCode==Keys.Space){focused=Math.Max(0,focused);choose(entries[focused],e.Shift);e.Handled=true;}}
+        protected override void Dispose(bool disposing){if(disposing&&!IsDisposed){FlushSave();saveDelay.Dispose();load.Stop();animation.Stop();load.Dispose();animation.Dispose();requests.Cancel();requests.Dispose();tooltip.Dispose();foreach(var thumb in cache.Values)thumb.Dispose();cache.Clear();}base.Dispose(disposing);}
+    }
+    sealed class PackRailButton:UiButton {
+        public readonly string PackId;Image thumb;string thumbnailPath;
+        public PackRailButton(string id,Entry entry){PackId=id;Size=new Size(38,42);Margin=new Padding(0,0,0,7);Quiet=true;Text="";UpdateThumbnail(entry);}
+        internal void UpdateThumbnail(Entry entry){string path=entry==null?null:entry.Path;if(path==thumbnailPath&&(thumb!=null||path==null))return;Image next=null;if(path!=null)try{using(var source=Image.FromFile(path))next=new Bitmap(source);}catch{}var old=thumb;thumb=next;thumbnailPath=path;if(old!=null)old.Dispose();Invalidate();}
+        internal void TestMouseDown(){var message=Message.Create(Handle,0x201,new IntPtr(1),new IntPtr(0x00050005));WndProc(ref message);Capture=false;}
+        protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);if(thumb!=null){double scale=Math.Min(30.0/thumb.Width,30.0/thumb.Height);int w=(int)(thumb.Width*scale),h=(int)(thumb.Height*scale);e.Graphics.DrawImage(thumb,new Rectangle((Width-w)/2,(Height-h)/2,w,h));}else if(PackId==null){using(var brush=new SolidBrush(Active?Color.White:Ui.Muted))for(int i=0;i<4;i++)e.Graphics.FillRectangle(brush,new Rectangle(10+(i%2)*11,12+(i/2)*11,8,8));}else using(var font=Ui.Regular(8))TextRenderer.DrawText(e.Graphics,PackId.StartsWith("arca:")?"아카":"디시",font,ClientRectangle,Active?Color.White:Ui.Muted,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);}
+        protected override void Dispose(bool disposing){if(disposing&&thumb!=null){thumb.Dispose();thumb=null;}base.Dispose(disposing);}
+    }
+    public sealed class LibraryView:UserControl {
+        public static void RenderSaved(){Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);var config=Catalog.Load();var source=config.Entries.ToList();using(var view=new LibraryView((e,shift)=>{},(e,p)=>{},()=>{})){view.Dock=DockStyle.None;view.Size=new Size(500,540);view.CreateControl();view.UpdateCatalog(source,config.Packs,"");for(int i=0;i<45;i++){Application.DoEvents();Thread.Sleep(80);}using(var bitmap=new Bitmap(view.Width,view.Height)){view.DrawToBitmap(bitmap,new Rectangle(Point.Empty,bitmap.Size));bitmap.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"library-preview.png"));File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"library-render.txt"),"Offscreen render; no visible window.\r\n"+view.grid.FailureSummary);}}}
+        sealed class PackOption {public string Id,Name;}
+        readonly UiButton picker=new UiButton{Dock=DockStyle.Fill,Text="모든 콘",Font=Ui.Bold(9),Quiet=true,LeftAlign=true};
+        readonly FlowLayoutPanel rail=new FlowLayoutPanel{Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false,AutoScroll=true,Margin=new Padding(0,0,8,0),Padding=new Padding(2,3,2,0)};
+        readonly ToolTip packTips=new ToolTip();TableLayoutPanel layout;
+        readonly List<PackOption> options=new List<PackOption>();
+        readonly Label count=Ui.Label("",8);readonly LibraryGrid grid;
+        List<Entry> entries=new List<Entry>();IList<PackRecord> packs=new List<PackRecord>();string query="",selectedId;
+        public LibraryView(Action<Entry,bool> choose,Action<Entry,Point> menu,Action saved,Action interactionStarting=null){
+            Dock=DockStyle.Fill;BackColor=Ui.Paper;
+            layout=new TableLayoutPanel{Dock=DockStyle.Fill,RowCount=3,ColumnCount=2,Margin=Padding.Empty};
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,54));layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,32));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,22));layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));Controls.Add(layout);layout.Controls.Add(rail,0,0);layout.SetRowSpan(rail,3);
+            picker.AccessibleName="보관한 콘 팩 선택";picker.Click+=(s,e)=>OpenPicker();layout.Controls.Add(picker,1,0);
+            count.Dock=DockStyle.Fill;count.ForeColor=Ui.Muted;layout.Controls.Add(count,1,1);
+            grid=new LibraryGrid(choose,menu,saved){Dock=DockStyle.Fill,InteractionStarting=interactionStarting};layout.Controls.Add(grid,1,2);
+        }
+        bool railPending;
+        internal static void TestRailLifetime(){int checks=0;Action<bool> check=value=>{if(!value)throw new Exception("Rail lifetime check "+checks);checks++;};string report=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"rail-lifetime-test.txt");try{using(var view=new LibraryView((e,s)=>{},(e,p)=>{},()=>{})){
+            view.CreateControl();var packs=new List<PackRecord>();var first=new List<Entry>{new Entry{PackId="a",Path="missing-a.png",DisplayName="first"},new Entry{PackId="b",Path="missing-b.png",DisplayName="second"}};view.UpdateCatalog(first,packs,"");Application.DoEvents();var all=view.rail.Controls.Cast<PackRailButton>().First(item=>item.PackId==null);var a=view.rail.Controls.Cast<PackRailButton>().First(item=>item.PackId=="a");var b=view.rail.Controls.Cast<PackRailButton>().First(c=>c.PackId=="b");var handle=a.Handle;
+            for(int i=0;i<20;i++){view.UpdateCatalog(first,packs,i%2==0?"first":"");check(!a.IsDisposed&&a.Handle==handle);}Application.DoEvents();check(view.rail.Controls.Count==3);check(view.rail.Controls.Contains(a)&&view.rail.Controls.Contains(all));
+            bool nested=false;a.MouseDown+=(s,e)=>{nested=true;view.UpdateCatalog(new List<Entry>{new Entry{PackId="b",Path="missing-b.png",DisplayName="updated"},new Entry{PackId="c",Path="missing-c.png",DisplayName="new"}},packs,"");check(!a.IsDisposed&&a.Handle==handle);check(view.rail.Controls.Contains(a));};a.TestMouseDown();check(nested);check(!a.IsDisposed);Application.DoEvents();check(a.IsDisposed);check(view.rail.Controls.Count==3);check(view.rail.Controls.Contains(all)&&view.rail.Controls.Contains(b));check(view.rail.Controls.Cast<PackRailButton>().Select(c=>c.PackId).SequenceEqual(new string[]{null,"b","c"}));b.PerformClick();check(view.selectedId=="b");check(view.grid!=null);view.UpdateCatalog(first,packs,"");view.Dispose();Application.DoEvents();check(view.IsDisposed);
+        }File.WriteAllText(report,"PASS: "+checks+" rail lifetime checks, repeated/coalesced catalog updates, nested mouse message, button reuse/removal/order/selection, pending callback after disposal. No Kakao, clipboard, cursor, or external input.\r\n");}catch(Exception ex){File.WriteAllText(report,"FAIL: "+ex);Environment.ExitCode=1;}}
+        // Focus/visibility callbacks can update the catalog inside Button.WmMouseDown.
+        // Leave every live button intact until that native message has returned.
+        void RebuildRail(){if(IsDisposed||Disposing||railPending)return;if(!IsHandleCreated){BuildRailNow();return;}railPending=true;BeginInvoke((Action)(()=>{railPending=false;if(!IsDisposed&&!Disposing)BuildRailNow();}));}
+        void BuildRailNow(){rail.SuspendLayout();try{
+            var existing=rail.Controls.Cast<PackRailButton>().ToList();
+            foreach(var button in existing.Where(b=>!options.Any(o=>o.Id==b.PackId))){packTips.SetToolTip(button,null);rail.Controls.Remove(button);button.Dispose();}
+            for(int i=0;i<options.Count;i++){var option=options[i];var entry=entries.FirstOrDefault(e=>(e.PackId??"")==option.Id&&!String.IsNullOrEmpty(e.Path)&&File.Exists(e.Path));var button=existing.FirstOrDefault(b=>!b.IsDisposed&&b.PackId==option.Id);if(button==null){button=new PackRailButton(option.Id,entry);string id=option.Id;button.Click+=(s,e)=>{if(!options.Any(o=>o.Id==id))return;selectedId=id;Filter();};rail.Controls.Add(button);}else button.UpdateThumbnail(entry);button.AccessibleName=option.Name;packTips.SetToolTip(button,option.Name);button.Active=option.Id==selectedId;rail.Controls.SetChildIndex(button,i);button.Invalidate();}
+        }finally{rail.ResumeLayout(true);}}
+        protected override void Dispose(bool disposing){if(disposing)packTips.Dispose();base.Dispose(disposing);}
+        void OpenPicker(){var menu=new ContextMenuStrip();foreach(var option in options){var selected=option;var item=new ToolStripMenuItem(option.Name){Checked=option.Id==selectedId};item.Click+=(s,e)=>{selectedId=selected.Id;Filter();};menu.Items.Add(item);}menu.Closed+=(s,e)=>Ui.DisposeMenuLater(menu);menu.Show(picker,new Point(0,picker.Height));}
+        public void NotifyPrepared(Entry entry){grid.NotifyPrepared(entry);}
+        public void UpdateCatalog(List<Entry> source,IList<PackRecord> packList,string search){entries=source;packs=packList;query=search;options.Clear();options.Add(new PackOption{Id=null,Name="모든 팩 · "+entries.Count+"개"});foreach(var group in entries.GroupBy(e=>e.PackId??""))options.Add(new PackOption{Id=group.Key,Name=LibraryModel.PackName(group.First(),packs)+" · "+group.Count()+"개"});if(!options.Any(p=>p.Id==selectedId))selectedId=null;RebuildRail();Filter();}
+        void Filter(){var option=options.FirstOrDefault(p=>p.Id==selectedId);picker.Text=(option==null?"모든 콘":option.Name)+"  ∨";var items=LibraryModel.Filter(entries,packs,selectedId,query);count.Text="  "+items.Count+"개의 검색 결과";count.Visible=!String.IsNullOrWhiteSpace(query);layout.RowStyles[1].Height=count.Visible?22:8;foreach(PackRailButton button in rail.Controls){button.Active=button.PackId==selectedId;button.Invalidate();}grid.SetItems(items,packs);}
+    }
+}
+

@@ -1,0 +1,26 @@
+import assert from 'node:assert/strict';
+import { requestQueue } from './request-queue.mjs';
+let release;
+const wait = new Promise(resolve => { release = resolve; });
+const calls = [], results = [], errors = [];
+const receive = requestQueue(async (data, canceled) => {
+    calls.push(data.id);
+    if (data.id === 1) await wait;
+    if (data.id === 4) throw Error('test-only');
+    if (!canceled()) results.push(data.id);
+}, id => errors.push(id));
+receive({id: 1});
+await Promise.resolve();
+receive({id: 2});
+receive({action: 'cancel', cancelId: 1});
+receive({action: 'cancel', cancelId: 2});
+const done = receive({id: 3});
+release();
+await done;
+assert.deepEqual(calls, [1, 3]);
+assert.deepEqual(results, [3]);
+await receive({id: 4});
+await receive({id: 5});
+assert.deepEqual(errors, [4]);
+assert.deepEqual(results, [3, 5]);
+console.log('PASS: active result discarded, queued work skipped, errors isolated, later requests run. No models or network.');

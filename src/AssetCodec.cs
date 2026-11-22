@@ -1,0 +1,34 @@
+﻿using System.Linq;
+using System;
+using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Collections.Concurrent;
+using System.IO;
+using System.Runtime.Serialization;
+using System.Runtime.Serialization.Json;
+using System.Text;
+using System.Threading;
+
+namespace AgitCon {
+    [DataContract] class CodecResult {[DataMember(Name="path")]public string Path;[DataMember(Name="error")]public string Error;}
+    [DataContract] sealed class WebpReceipt { [DataMember(Name="spec")]public string Spec;[DataMember(Name="source")]public string Source;[DataMember(Name="sha256")]public string Hash;[DataMember(Name="path")]public string Path;[DataMember(Name="error")]public string Error;[DataMember(Name="frames")]public int Frames;[DataMember(Name="length")]public long Length;}
+    public static class AssetCodec {
+        static void Stop(Process process){try{if(!process.HasExited)Process.Start(new ProcessStartInfo("taskkill.exe","/PID "+process.Id+" /T /F"){UseShellExecute=false,CreateNoWindow=true});}catch{try{process.Kill();}catch{}}}
+        public static bool Encoded(byte[] bytes){return bytes.Length>=12&&((Encoding.ASCII.GetString(bytes,0,4)=="RIFF"&&Encoding.ASCII.GetString(bytes,8,4)=="WEBP")||Encoding.ASCII.GetString(bytes,4,4)=="ftyp"||(bytes[0]==26&&bytes[1]==69&&bytes[2]==223&&bytes[3]==163));}
+        static string Python(){string bundled=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"runtime","python","python.exe");if(File.Exists(bundled))return bundled;string marker=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"codecs","python-path.txt");if(File.Exists(marker)){string path=File.ReadAllText(marker).Trim();if(File.Exists(path))return path;}string installed=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Programs","Python","Python311","python.exe");return File.Exists(installed)?installed:"python.exe";}
+        static readonly ConcurrentDictionary<string,SemaphoreSlim> webpLocks=new ConcurrentDictionary<string,SemaphoreSlim>();
+        static string Digest(string path){using(var stream=File.OpenRead(path))using(var sha=SHA256.Create())return BitConverter.ToString(sha.ComputeHash(stream)).Replace("-","").ToLowerInvariant();}
+        public static string AnimatedWebp(string source,CancellationToken cancel){
+            cancel.ThrowIfCancellationRequested();if(new FileInfo(source).Length>30*1024*1024)throw new Exception("30MB 이하 움짤만 변환해요.");string hash=Digest(source),folder=Path.Combine(DcShop.CacheRoot,"webp-attachments-v3"),file=Path.Combine(folder,hash+".webp"),receipt=Path.ChangeExtension(file,".json");var gate=webpLocks.GetOrAdd(hash,key=>new SemaphoreSlim(1));gate.Wait(cancel);
+            try{if(File.Exists(file)&&File.Exists(receipt))try{var cached=GemmaHost.Read<WebpReceipt>(File.ReadAllText(receipt));if(cached!=null&&cached.Spec=="animated-webp-lossless-v3"&&cached.Source==hash&&cached.Frames>=2&&new FileInfo(file).Length==cached.Length&&Digest(file)==cached.Hash)return file;}catch(IOException){}catch(SerializationException){}
+                string script=Path.Combine(SemanticSearch.Root,"animated-webp.py");string staged=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"pending-semantic","animated-webp.py");if(!new[]{"AgitCon.exe","AjitCon.exe"}.Contains(Path.GetFileName(Process.GetCurrentProcess().MainModule.FileName),StringComparer.OrdinalIgnoreCase)&&File.Exists(staged))script=staged;var info=new ProcessStartInfo(Python(),"\""+script+"\" \""+Path.GetFullPath(source)+"\" \""+folder+"\""){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true,StandardOutputEncoding=Encoding.UTF8};info.EnvironmentVariables["PYTHONUTF8"]="1";
+                using(var process=Process.Start(info))using(cancel.Register(()=>Stop(process))){var output=process.StandardOutput.ReadToEndAsync();var errors=process.StandardError.ReadToEndAsync();if(!process.WaitForExit(75000)){Stop(process);throw new Exception("WebP 변환 시간이 초과됐어요.");}cancel.ThrowIfCancellationRequested();string json=output.GetAwaiter().GetResult();if(String.IsNullOrWhiteSpace(json))throw new Exception("WebP 변환 스크립트가 결과를 반환하지 않았어요.");var result=GemmaHost.Read<WebpReceipt>(json);if(process.ExitCode!=0||!String.IsNullOrEmpty(result.Error)||result.Frames<2||result.Spec!="animated-webp-lossless-v3"||result.Source!=hash||!String.Equals(result.Path,file,StringComparison.OrdinalIgnoreCase)||!File.Exists(file)||Digest(file)!=result.Hash)throw new Exception("움직이는 WebP 변환을 확인하지 못했어요. "+result.Error);return file;}
+            }finally{gate.Release();}
+        }
+        public static byte[] Convert(byte[] bytes,CancellationToken cancel){string work=Path.Combine(DcShop.CacheRoot,"codec-work",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(work);string input=Path.Combine(work,"input.asset"),outputBase=Path.Combine(work,"output");File.WriteAllBytes(input,bytes);
+            try{string script=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"codecs","convert.py");var info=new ProcessStartInfo(Python(),"\""+script+"\" \""+input+"\" \""+outputBase+"\""){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true,StandardOutputEncoding=Encoding.UTF8,StandardErrorEncoding=Encoding.UTF8};info.EnvironmentVariables["PYTHONUTF8"]="1";
+                using(var process=Process.Start(info))using(cancel.Register(()=>Stop(process))){var output=process.StandardOutput.ReadToEndAsync();var errors=process.StandardError.ReadToEndAsync();if(!process.WaitForExit(75000)){Stop(process);process.WaitForExit(3000);throw new Exception("아카콘 변환 시간이 초과됐어요.");}cancel.ThrowIfCancellationRequested();string json=output.GetAwaiter().GetResult();string stderr=errors.GetAwaiter().GetResult();if(String.IsNullOrWhiteSpace(json))throw new InvalidOperationException("이미지 변환 프로그램 결과가 없어요 (종료 코드 "+process.ExitCode+"). "+(String.IsNullOrWhiteSpace(stderr)?"runtime과 codecs 폴더를 함께 교체해주세요.":stderr.Substring(0,Math.Min(1200,stderr.Length)).Trim()));CodecResult result;try{using(var stream=new MemoryStream(Encoding.UTF8.GetBytes(json)))result=(CodecResult)new DataContractJsonSerializer(typeof(CodecResult)).ReadObject(stream);}catch(SerializationException){throw new InvalidOperationException("이미지 변환 결과 형식이 올바르지 않아요 (종료 코드 "+process.ExitCode+"). "+stderr.Substring(0,Math.Min(1200,stderr.Length)).Trim());}if(result==null||!String.IsNullOrEmpty(result.Error))throw new Exception(result==null?"아카콘 변환에 실패했어요.":result.Error);if(result.Path!=outputBase+".png"&&result.Path!=outputBase+".gif")throw new Exception("변환 결과 경로가 잘못됐어요.");var file=new FileInfo(result.Path);if(!file.Exists||file.Length>30*1024*1024)throw new Exception("변환 결과가 없거나 용량이 너무 커요.");return File.ReadAllBytes(file.FullName);}
+            }finally{foreach(string file in Directory.EnumerateFiles(work))File.Delete(file);Directory.Delete(work);}
+        }
+    }
+}

@@ -1,0 +1,16 @@
+{
+  "webview2-1.0.4314.35.nupkg": 9818548,
+  "transformers.min.js": 586230,
+  "ort-wasm-simd-threaded.asyncify.mjs": 53057,
+  "ort-wasm-simd-threaded.asyncify.wasm": 26861777,
+  "config.json": 5031,
+  "preprocessor_config.json": 560,
+  "processor_config.json": 1788,
+  "tokenizer.json": 32170510,
+  "tokenizer_config.json": 1599,
+  "model_q4.onnx": 490742,
+  "model_q4.onnx_data": 174028800,
+  "vision_encoder_q4.onnx": 159400,
+  "vision_encoder_q4.onnx_data": 108957696,
+  "MODEL-CARD.md": 28720
+}
