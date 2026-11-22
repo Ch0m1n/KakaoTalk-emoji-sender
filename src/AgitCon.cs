@@ -630,6 +630,7 @@ namespace AgitCon {
             if(args.Contains("--ocr-check")){OcrSetupForm.Probe();return;}
             if(args.Contains("--thumbnail-recovery-test")){LibraryGrid.TestRecovery();return;}
             if(args.Contains("--thumbnail-settings-test")){SemanticSettingsForm.TestThumbnails();return;}
+            if(args.Contains("--hover-animation-test")){LibraryGrid.TestHoverMotion();return;}
             if(args.Contains("--thumbnail-memory-test")){EncodedPreviews.Test();return;}
             if(args.Contains("--thumbnail-cache-test")){LibraryGrid.TestPersistentCache();return;}
             if(args.Contains("--library-memory-speed")){LibraryGrid.TestCacheSpeed(true);return;}
@@ -659,6 +660,7 @@ namespace AgitCon {
                 using(var form=new MainForm()) {form.Show();for(int i=0;i<10;i++){Application.DoEvents();System.Threading.Thread.Sleep(30);}using(var bitmap=new Bitmap(form.Width,form.Height)){form.DrawToBitmap(bitmap,new Rectangle(0,0,bitmap.Width,bitmap.Height));bitmap.Save(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"ui-smoke.png"));}}
                 return;
             }
+            if(args.Any(arg=>arg.StartsWith("--",StringComparison.Ordinal)&&arg.EndsWith("-test",StringComparison.Ordinal))){Environment.ExitCode=2;return;}
             try {Run();} catch(Exception ex) {
                 File.WriteAllText(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"startup-error.txt"),ex.ToString(),Encoding.UTF8);
                 MessageBox.Show("아지트콘 실행 오류: "+ex.Message);
