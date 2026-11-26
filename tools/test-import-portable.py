@@ -22,4 +22,15 @@ with tempfile.TemporaryDirectory() as folder:
     except ValueError:pass
     else:raise AssertionError('Existing user data overwritten')
     assert module.migrate(new,new).startswith('Existing')
+    import ctypes
+    buffer=ctypes.create_unicode_buffer(32768)
+    short=ctypes.windll.kernel32.GetShortPathNameW(str(image),buffer,len(buffer))
+    if short:
+        # Force a short-name catalog against a fully resolved source directory.
+        original['Entries'][0]['Path']=buffer.value
+        catalog.write_text(json.dumps(original,ensure_ascii=False),encoding='utf-8-sig')
+        alias_target=root/'short-alias-target';alias_target.mkdir()
+        module.migrate(old.resolve(),alias_target)
+        result=json.loads((alias_target/'data/catalog.json').read_text('utf-8-sig'))
+        assert Path(result['Entries'][0]['Path']).resolve()==(alias_target/'data/images/콘.gif').resolve()
 print('PASS: portable import, Unicode/BOM, path relocation, external paths, source preservation, no overwrite.')

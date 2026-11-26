@@ -36,14 +36,22 @@ def migrate(source, target):
     catalog = json.loads(raw.decode(encoding))
     if not isinstance(catalog, dict):
         raise ValueError('Invalid catalog')
-    prefix = str(source).rstrip('\\/') + '\\'
     def rewrite(value):
         if isinstance(value, dict):
             return {key: rewrite(item) for key, item in value.items()}
         if isinstance(value, list):
             return [rewrite(item) for item in value]
-        if isinstance(value, str) and value.replace('/', '\\').lower().startswith(prefix.lower()):
-            return str(target/value[len(prefix):].replace('\\', '/'))
+        if isinstance(value, str):
+            candidate = Path(value)
+            if candidate.is_absolute() and candidate.drive.lower() == source.drive.lower():
+                try:
+                    # Resolve both sides: existing catalogs can use DOS 8.3 aliases
+                    # while the installer folder picker returns the long path.
+                    relative = candidate.resolve().relative_to(source)
+                except (ValueError, OSError):
+                    pass  # External or unavailable paths must stay unchanged.
+                else:
+                    return str(target/relative)
         return value
     stage = target/('.import-'+uuid.uuid4().hex)
     try:
