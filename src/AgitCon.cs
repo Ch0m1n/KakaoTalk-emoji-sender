@@ -178,7 +178,7 @@ namespace AgitCon {
             MinimumSize=new Size(350,590); FormBorderStyle=FormBorderStyle.Sizable;
             BackColor=Ui.Paper; StartPosition=FormStartPosition.CenterScreen;
             layout=new TableLayoutPanel {Dock=DockStyle.Fill,Padding=new Padding(14),ColumnCount=1,RowCount=10};
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute,42));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute,80));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute,34));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute,31));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute,36));
@@ -189,10 +189,18 @@ namespace AgitCon {
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute,36));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute,66));
             Controls.Add(layout);
-            var heading=new Panel{Dock=DockStyle.Fill};var title=new Label{Text="아지트콘",Font=Ui.Bold(17),Dock=DockStyle.Fill};collectionButton=Ui.Button("콘 9분할",OpenCollection,true);collectionButton.Dock=DockStyle.Right;collectionButton.Width=118;doubleButton=Ui.Button("더블콘",OpenDouble,true);doubleButton.Dock=DockStyle.Right;doubleButton.Width=collectionButton.Width;heading.Controls.Add(title);heading.Controls.Add(collectionButton);heading.Controls.Add(doubleButton);layout.Controls.Add(heading,0,0);
+            var heading=new TableLayoutPanel{Dock=DockStyle.Fill,Margin=Padding.Empty,ColumnCount=1,RowCount=2};
+            heading.RowStyles.Add(new RowStyle(SizeType.Absolute,34));heading.RowStyles.Add(new RowStyle(SizeType.Percent,100));
+            var title=new Label{Text="아지트콘",Font=Ui.Bold(17),Dock=DockStyle.Fill,Margin=Padding.Empty};heading.Controls.Add(title,0,0);
+            var sendTools=new TableLayoutPanel{Dock=DockStyle.Fill,Margin=Padding.Empty,ColumnCount=3,RowCount=1};
+            for(int i=0;i<3;i++)sendTools.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100f/3));
+            collectionButton=Ui.Button("콘 9분할",OpenCollection,true);doubleButton=Ui.Button("더블콘",OpenDouble,true);var longButton=Ui.Button("롱콘",OpenLong,true);
+            var sendButtons=new[]{collectionButton,doubleButton,longButton};
+            for(int i=0;i<sendButtons.Length;i++){sendButtons[i].Dock=DockStyle.Fill;sendButtons[i].Margin=new Padding(3,2,3,4);sendTools.Controls.Add(sendButtons[i],i,0);}
+            heading.Controls.Add(sendTools,0,1);layout.Controls.Add(heading,0,0);
             var toolbar=new FlowLayoutPanel {Dock=DockStyle.Fill,Margin=Padding.Empty};
             toolbar.Controls.Add(Button("팩 관리",OpenShop)); toolbar.Controls.Add(Button("새로고침",Rescan));
-            toolbar.Controls.Add(Button("설정",OpenSettings));toolbar.Controls.Add(Button("롱콘",OpenLong)); layout.Controls.Add(toolbar,0,1);
+            toolbar.Controls.Add(Button("설정",OpenSettings));layout.Controls.Add(toolbar,0,1);
             follow.Text="카톡 입력창 따라가기"; follow.Dock=DockStyle.Fill; follow.CheckedChanged+=(s,e)=>{if(config!=null){config.FloatingPalette=follow.Checked;Save();}ApplyFloatingMode();if(initialized)TickWatch();}; layout.Controls.Add(follow,0,2);
             search.AccessibleName="파일명 또는 별칭 검색";
             search.TextChanged+=(s,e)=>{ClearDraft(false);if(!switchingRoom&&compact&&anchor!=null)roomQueries[anchor.Key]=search.Text;Render();};var searchField=Ui.Field(search,"콘 이름, 별칭, 팩으로 검색");searchField.Dock=DockStyle.Fill;layout.Controls.Add(searchField,0,3);
@@ -256,7 +264,7 @@ namespace AgitCon {
         void SetLibraryMode(bool show,bool automatic=false){BeginStickerSelection();if(!automatic)libraryPinned=show;if(show)ClearDraft(false);rankedGrid.Visible=false;libraryMode=show;libraryTab.Active=show;recommendTab.Active=!show;libraryTab.Invalidate();recommendTab.Invalidate();library.Visible=show;rows.Visible=!show;ApplyFloatingMode();}
         void ShowLibraryMenu(Entry entry,Point point){var menu=new ContextMenuStrip();menu.Items.Add("별칭 편집",null,(s,e)=>EditAliases(entry));menu.Items.Add("카톡 호환 PNG/GIF 파일 복사",null,(s,e)=>Copy(entry,true,false));menu.Items.Add("원본 파일만 복사",null,(s,e)=>Copy(entry,false,false));menu.Closed+=(s,e)=>Ui.DisposeMenuLater(menu);menu.Show(point);}
         void ApplyFloatingMode(){DpiGeometry.OwnUi(this,ApplyFloatingLayout);}
-        void ApplyFloatingLayout(){if(layout==null)return;compact=follow.Checked;SuspendLayout();MinimumSize=compact?new Size(UiZoom.Installed(this)?UiZoom.Px(310):310,UiZoom.Installed(this)?UiZoom.Px(360):360):new Size(UiZoom.Installed(this)?UiZoom.Px(350):350,UiZoom.Installed(this)?UiZoom.Px(590):590);layout.Padding=new Padding(UiZoom.Installed(this)?UiZoom.Px(compact?10:14):(compact?10:14));int[] heights=compact?new[]{44,30,0,46,-1,0,0,0,28,32}:new[]{44,32,0,46,-1,26,31,36,30,42};for(int i=0;i<heights.Length;i++){var control=layout.GetControlFromPosition(0,i);if(control!=null)control.Visible=heights[i]!=0;if(i!=4){layout.RowStyles[i].SizeType=SizeType.Absolute;layout.RowStyles[i].Height=UiZoom.Installed(this)?UiZoom.Px(heights[i]):heights[i];}}ClientSize=compact?new Size(UiZoom.Installed(this)?UiZoom.Px(400):400,UiZoom.Installed(this)?UiZoom.Px(libraryMode?600:450):(libraryMode?600:450)):new Size(UiZoom.Installed(this)?UiZoom.Px(500):500,UiZoom.Installed(this)?UiZoom.Px(730):730);UpdateAliasLayout();ResumeLayout(true);if(config!=null&&!refreshing)Render();}
+        void ApplyFloatingLayout(){if(layout==null)return;compact=follow.Checked;SuspendLayout();MinimumSize=compact?new Size(UiZoom.Installed(this)?UiZoom.Px(310):310,UiZoom.Installed(this)?UiZoom.Px(360):360):new Size(UiZoom.Installed(this)?UiZoom.Px(350):350,UiZoom.Installed(this)?UiZoom.Px(590):590);layout.Padding=new Padding(UiZoom.Installed(this)?UiZoom.Px(compact?10:14):(compact?10:14));int[] heights=compact?new[]{80,30,0,46,-1,0,0,0,28,32}:new[]{80,32,0,46,-1,26,31,36,30,42};for(int i=0;i<heights.Length;i++){var control=layout.GetControlFromPosition(0,i);if(control!=null)control.Visible=heights[i]!=0;if(i!=4){layout.RowStyles[i].SizeType=SizeType.Absolute;layout.RowStyles[i].Height=UiZoom.Installed(this)?UiZoom.Px(heights[i]):heights[i];}}ClientSize=compact?new Size(UiZoom.Installed(this)?UiZoom.Px(400):400,UiZoom.Installed(this)?UiZoom.Px(libraryMode?600:450):(libraryMode?600:450)):new Size(UiZoom.Installed(this)?UiZoom.Px(500):500,UiZoom.Installed(this)?UiZoom.Px(730):730);UpdateAliasLayout();ResumeLayout(true);if(config!=null&&!refreshing)Render();}
         void BindRoom(ChatAnchor next){if(anchor==null||anchor.Key!=next.Key){if(anchor!=null)roomQueries[anchor.Key]=search.Text;roomVersion++;if(copyRequest!=null)copyRequest.Cancel();anchor=next;target=next.Window;targetTitle=next.Title;string query;roomQueries.TryGetValue(next.Key,out query);switchingRoom=true;try{search.Text=query??"";}finally{switchingRoom=false;}}else anchor=next;}
         void SetRecommendationCaption(string text){recommendTab.Text=text;recommendTab.AccessibleName=text;recommendTab.Invalidate();}
         void SetRecommendationHint(string text){var hint=rows.Controls.OfType<Label>().FirstOrDefault();if(hint!=null)hint.Text=text;}
