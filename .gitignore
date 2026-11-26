@@ -44,3 +44,5 @@ test-work/
 !/tools/prepare-installer.ps1
 !/tools/InstallerPreview.cs
 !/tools/test-installer-preview.ps1
+
+!/tools/test-updater-identity.ps1

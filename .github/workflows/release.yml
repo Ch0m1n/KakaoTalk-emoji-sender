@@ -1,4 +1,4 @@
-﻿name: Build and release
+name: Build and release
 on:
   push:
     branches: [main]
@@ -39,6 +39,7 @@ jobs:
         shell: pwsh
         run: |
           ./tools/test-build.ps1 -OutputName "AgitCon-$env:ARCHITECTURE.exe" -Flags @('--bundle-test','--photo-native-test','--qt-transfer-test','--autoplay-integration-test','--dpi-policy-test','--dpi-geometry-test','--ui-zoom-test','--hover-animation-test','--thumbnail-memory-test','--thumbnail-cache-test','--scroll-repaint-test','--arca-search-test','--app-update-test','--longcon-test','--release-self-check','--copy-refresh-test','--preview-paste-test','--attachment-flow-test','--floating-test','--floating-position-test','--draft-test')
+          if($env:ARCHITECTURE -eq 'x64'){./tools/test-updater-identity.ps1}
           python tools/test-import-portable.py
           if($LASTEXITCODE){throw 'Data migration failed'}
           Get-ChildItem autoplay/tools -Filter '*.cjs' | ForEach-Object {node $_.FullName;if($LASTEXITCODE){throw 'Autoplay JS regression failed'}}

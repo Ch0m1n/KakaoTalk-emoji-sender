@@ -23,6 +23,13 @@ namespace AgitCon.Updates {
         [DataMember]public string Root;[DataMember]public string Package;[DataMember]public string Sha256;[DataMember]public string Version;[DataMember]public int Process;[DataMember]public long Started;[DataMember]public bool Installer;
     }
     public static class UpdateCore {
+        [System.Runtime.InteropServices.DllImport("kernel32.dll",SetLastError=true)]static extern IntPtr OpenProcess(uint access,bool inherit,int pid);
+        [System.Runtime.InteropServices.DllImport("kernel32.dll",CharSet=System.Runtime.InteropServices.CharSet.Unicode,SetLastError=true)]static extern bool QueryFullProcessImageName(IntPtr process,uint flags,StringBuilder path,ref uint count);
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]static extern bool CloseHandle(IntPtr handle);
+        public static string ProcessImagePath(int pid){
+            if(pid<=0)throw new ArgumentOutOfRangeException("pid");IntPtr handle=OpenProcess(0x1000,false,pid);if(handle==IntPtr.Zero)throw new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error());
+            try{var path=new StringBuilder(32768);uint length=(uint)path.Capacity;if(!QueryFullProcessImageName(handle,0,path,ref length))throw new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error());return Path.GetFullPath(path.ToString());}finally{CloseHandle(handle);}
+        }
         public const string Repository="Ch0m1n/KakaoTalk-emoji-sender";
         public static readonly string AssetName="AgitCon-win-"+(IntPtr.Size==8?"x64":"x86")+".zip";
         public const string Api="https://api.github.com/repos/"+Repository+"/releases/latest";

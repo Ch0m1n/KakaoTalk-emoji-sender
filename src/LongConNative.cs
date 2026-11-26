@@ -62,10 +62,12 @@ namespace AgitCon {
                 UIntPtr draftLength;if(SendMessageTimeout(target.Editor,0x000E,IntPtr.Zero,IntPtr.Zero,0x22,150,out draftLength)==IntPtr.Zero)throw new InvalidOperationException("작성 문장 상태를 확인하지 못했어요.");
                 long processStart;using(var process=Process.GetProcessById((int)target.ProcessId))processStart=process.StartTime.ToUniversalTime().Ticks;
                 longEnterProblem="not-attempted";longCurrentProblem="not-checked";bool started=false;uint sequence=0;LongProof proof=null;HashSet<IntPtr> before=null;photoFocusLost=false;photoTarget=target;FileAttachmentInProgress=true;
-                Func<bool> context=()=>{if(disposed||token.IsCancellationRequested||photoFocusLost||!roomCurrent()||!SameRoom(target))return false;try{using(var p=Process.GetProcessById((int)target.ProcessId))if(p.StartTime.ToUniversalTime().Ticks!=processStart)return false;}catch{return false;}
-                    IntPtr foreground=Native.GetForegroundWindow();return (!started&&foreground==source)||(foreground==target.Window)||(before!=null&&!before.Contains(foreground)&&OwnedByRoom(foreground,target));};
+                string contextProblem="not-checked";Func<bool> identity=()=>{contextProblem=disposed?"disposed":token.IsCancellationRequested?"canceled":photoFocusLost?"foreign-focus-event":!roomCurrent()?"room-selection-changed":!SameRoom(target)?"room-identity-changed":null;if(contextProblem!=null)return false;try{using(var p=Process.GetProcessById((int)target.ProcessId))if(p.StartTime.ToUniversalTime().Ticks!=processStart){contextProblem="process-restarted";return false;}}catch{contextProblem="process-unavailable";return false;}return true;};
+                Func<bool> context=()=>{if(!identity())return false;
+                    IntPtr foreground=Native.GetForegroundWindow();bool allowed=(!started&&foreground==source)||(foreground==target.Window)||(before!=null&&!before.Contains(foreground)&&OwnedByRoom(foreground,target));contextProblem=allowed?"current":foreground==IntPtr.Zero?"foreground-transition":"foreground-foreign/"+Class(foreground);return allowed;};
+                Func<CancellationToken,Task<bool>> waitReady=async cancel=>{bool ok=await LongFocusWait.Ready(identity,Native.GetForegroundWindow,context,t=>Task.Delay(10,t),cancel);if(!ok&&contextProblem==null)contextProblem="foreground-transition-timeout";return ok;};
                 Func<bool> composer=()=>{UIntPtr length;string reason;return context()&&Native.GetForegroundWindow()==target.Window&&Focus(target.ThreadId)==target.Editor&&Composer(target.Window,target.Editor)&&NoSelection(target.Editor,out reason)&&SendMessageTimeout(target.Editor,0x000E,IntPtr.Zero,IntPtr.Zero,0x22,150,out length)!=IntPtr.Zero&&length==draftLength;};
-                var checks=new LongFlowChecks{Current=context,Progress=n=>{if(trace!=null)trace(n,"enter-requested");progress.Report("전송 요청 "+n+" / "+ready.Parts.Count+"장");},
+                var checks=new LongFlowChecks{Current=context,Ready=waitReady,Progress=n=>{if(trace!=null)trace(n,"enter-requested");progress.Report("전송 요청 "+n+" / "+ready.Parts.Count+"장");},
                     Paste=async(index,cancel)=>{
                         if(started&&!composer())throw new InvalidOperationException("다음 조각 전에 입력창 상태가 달라졌어요.");
                         before=OwnedWindows(target);proof=null;Clipboard.SetDataObject(ready.Parts[index].Data,true,5,40);sequence=GetClipboardSequenceNumber();
@@ -86,12 +88,12 @@ namespace AgitCon {
                         longEnterProblem="modifiers-held";if(Control.ModifierKeys!=Keys.None)return false;
                         longEnterProblem="proof-invalid";if(!LongProofCurrent(found,target))return false;
                         longEnterProblem="post-key-result-unknown";bool sent=LongEnterToWindow(found.Window);if(sent)longEnterProblem="requested";return sent;},
-                    Dismissed=async(value,cancel)=>{var found=(LongProof)value;var clock=Stopwatch.StartNew();while(clock.ElapsedMilliseconds<3500){cancel.ThrowIfCancellationRequested();if(!context())return false;
+                    Dismissed=async(value,cancel)=>{var found=(LongProof)value;var clock=Stopwatch.StartNew();while(clock.ElapsedMilliseconds<3500){cancel.ThrowIfCancellationRequested();if(!await waitReady(cancel))return false;
                             if(!Native.IsWindow(found.Window)||!IsWindowVisible(found.Window)){if(composer())return true;if(Native.GetForegroundWindow()!=target.Window)return false;}
                             await Task.Delay(10,cancel);
                         }return false;}
                 };
-                var result=await LongFlow.Run(ready.Parts.Count,checks,token);if(trace!=null)trace(result.Requested,result.Stage+" / pasted="+result.Pasted+" / "+longProofProblem+" / "+longVisualProblem+" / enter="+longEnterProblem+" / current="+longCurrentProblem);return result;
+                var result=await LongFlow.Run(ready.Parts.Count,checks,token);if(trace!=null)trace(result.Requested,result.Stage+" / pasted="+result.Pasted+" / "+longProofProblem+" / "+longVisualProblem+" / enter="+longEnterProblem+" / current="+longCurrentProblem+" / context="+contextProblem);return result;
             }finally{FileAttachmentInProgress=false;photoTarget=null;transition=false;Invalidate();pasteGate.Release();}
         }
     }

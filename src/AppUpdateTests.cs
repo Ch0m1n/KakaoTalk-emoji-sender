@@ -14,6 +14,7 @@ namespace AgitCon {
    if(extra!=null)using(var writer=new StreamWriter(zip.CreateEntry(extra).Open()))writer.Write("bad");
   }return file;}
   internal static void Run(){string root=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-work","app-update-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
+   Check(String.Equals(UpdateCore.ProcessImagePath(System.Diagnostics.Process.GetCurrentProcess().Id),Path.GetFullPath(typeof(Program).Assembly.Location),StringComparison.OrdinalIgnoreCase),"limited-query process image identity");Reject(()=>UpdateCore.ProcessImagePath(0),"invalid process identity");
    Check(UpdateCore.ParseVersion("v1.10.0")>UpdateCore.ParseVersion("1.9.9"),"numeric version");foreach(string text in new[]{"1.0","1.0.0-beta","01.0.0","1.0.0/../x","latest",null})Reject(()=>UpdateCore.ParseVersion(text),"version");
    foreach(string path in new[]{"../evil","/evil","a\\b","a:b","a/../b","a//b","a./b","a /b"})Reject(()=>UpdateCore.SafeRelative(path),"path");
    foreach(string path in new[]{"data/catalog.json","semantic/models/a","runtime/.venv/a","secret.txt","profile/cache"})Check(!UpdateCore.AllowedFile(path),"protected payload");

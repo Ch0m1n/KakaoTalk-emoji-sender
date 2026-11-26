@@ -17,6 +17,14 @@ namespace AgitCon {
             if(paths.Count!=9||paths.Any(p=>!File.Exists(p)||!String.Equals(Path.GetExtension(p),".png",StringComparison.OrdinalIgnoreCase)))throw new InvalidOperationException("분할 PNG 9개가 필요해요.");
             var files=new System.Collections.Specialized.StringCollection();files.AddRange(paths.Select(Path.GetFullPath).ToArray());var payload=new DataObject();payload.SetFileDropList(files);return payload;
         }
+        internal static List<string> PrepareAttachments(IList<string> paths,bool resize100,CancellationToken token){
+            PreviewPaste.AttachmentFileNames(paths,paths.Count);
+            if(!resize100)return paths.ToList();
+            string folder=Path.Combine(Path.GetDirectoryName(Path.GetFullPath(paths[0])),"100");Directory.CreateDirectory(folder);var prepared=new List<string>();
+            try{foreach(string source in paths){token.ThrowIfCancellationRequested();string resized=AssetCodec.ResizeForSend(source,true,token),name=Path.GetFileNameWithoutExtension(source);if(name.Length>64)name=name.Substring(0,44)+name.Substring(name.Length-20);string target=Path.Combine(folder,name+Path.GetExtension(resized));File.Copy(resized,target,true);prepared.Add(target);}
+                token.ThrowIfCancellationRequested();PreviewPaste.AttachmentFileNames(prepared,paths.Count);return prepared;
+            }catch{foreach(string file in prepared)if(File.Exists(file))File.Delete(file);throw;}
+        }
         public static List<string> Create(IList<string> paths,BundleMode mode,CancellationToken token,string sourceName=null) {
             if(paths.Count<1||paths.Count>9)throw new Exception("1~9개의 콘을 모아주세요.");
             if(mode==BundleMode.SplitNine&&paths.Count!=1)throw new Exception("9분할은 콘 한 개를 모았을 때 사용할 수 있어요.");

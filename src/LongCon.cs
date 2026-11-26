@@ -36,8 +36,14 @@ namespace AgitCon {
         }
         public void Dispose(){foreach(var part in Parts)part.Dispose();Parts.Clear();}
     }
+    internal static class LongFocusWait {
+        internal static async Task<bool> Ready(Func<bool> identity,Func<IntPtr> foreground,Func<bool> current,Func<CancellationToken,Task> pause,CancellationToken token){
+            for(int attempt=0;attempt<50;attempt++){token.ThrowIfCancellationRequested();if(!identity())return false;if(foreground()!=IntPtr.Zero)return current();await pause(token);}return false;
+        }
+    }
     internal sealed class LongFlowChecks {
         internal Func<bool> Current;
+        internal Func<CancellationToken,Task<bool>> Ready;
         internal Func<int,CancellationToken,Task> Paste;
         internal Func<CancellationToken,Task<object>> Preview;
         internal Func<object,bool> Enter;
@@ -50,10 +56,10 @@ namespace AgitCon {
         internal static async Task<LongFlowResult> Run(int count,LongFlowChecks c,CancellationToken token){
             if(count<2||count>20)throw new ArgumentOutOfRangeException("count");var result=new LongFlowResult();
             for(int i=0;i<count;i++){
-                token.ThrowIfCancellationRequested();result.Stage="before-paste";if(!c.Current())return result;
+                token.ThrowIfCancellationRequested();result.Stage="before-paste";if(!(c.Ready==null?c.Current():await c.Ready(token)))return result;
                 await c.Paste(i,token);result.Pasted++;token.ThrowIfCancellationRequested();result.Stage="preview-proof";
-                if(!c.Current())return result;object proof=await c.Preview(token);if(proof==null)return result;
-                token.ThrowIfCancellationRequested();result.Stage="before-enter";if(!c.Current())return result;
+                if(!(c.Ready==null?c.Current():await c.Ready(token)))return result;object proof=await c.Preview(token);if(proof==null)return result;
+                token.ThrowIfCancellationRequested();result.Stage="before-enter";if(!(c.Ready==null?c.Current():await c.Ready(token)))return result;
                 // Exactly one targeted Enter attempt per proved preview. Never retry.
                 if(!c.Enter(proof)){result.Stage="enter-result-unknown";return result;}
                 result.Requested++;if(c.Progress!=null)c.Progress(result.Requested);

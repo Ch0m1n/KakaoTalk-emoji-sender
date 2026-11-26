@@ -27,7 +27,7 @@ try{
         $csc=Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
         $stub=Join-Path $run 'old.cs'
         'class Old {static void Main(){System.Threading.Thread.Sleep(2500);}}'|Set-Content -LiteralPath $stub
-        & $csc /nologo /target:winexe "/platform:$Architecture" "/out:$(Join-Path $target 'AgitCon.exe')" $stub
+        & $csc /nologo /target:winexe "/platform:$(if($Architecture -eq 'x64'){'x86'}else{'x64'})" "/out:$(Join-Path $target 'AgitCon.exe')" $stub
         if($LASTEXITCODE){throw 'Parent fixture compilation failed'}
         $old=Start-Process -FilePath (Join-Path $target 'AgitCon.exe') -WindowStyle Hidden -PassThru
         $plan=@{Root=$target;Package=$setup;Sha256=(Get-FileHash -LiteralPath $setup).Hash.ToLowerInvariant();Version=$version;Process=$old.Id;Started=$old.StartTime.ToUniversalTime().Ticks;Installer=$true}
