@@ -1,4 +1,4 @@
-const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+﻿const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const code=fs.readFileSync(__dirname+'/kakao-qt-live.js','utf8');
 const expression=code.split("counts.photoStates=photos.map(p=>expression(p.object,p.context,\'")[1].split("\'")[0];
 function inspect(overrides={}){
@@ -36,3 +36,11 @@ now=196000;pump.pumpDownload();now=999999;pump.pumpDownload();assert.equal(start
 pump.downloadFailed=false;pump.downloadAttempts=0;pump.autoDownload=false;pump.pumpDownload();assert.equal(starts,3);
 pump.autoDownload=true;pump.onScreen=false;pump.pumpDownload();assert.equal(starts,3);
 console.log('Qt download queue: concurrency, out-of-order completion, dedup, backoff, timeout cap and disabled/offscreen passed');
+
+const metricClock={};vm.runInNewContext(extract(code,'detailedStatsDue'),metricClock);
+let lastDetailed=0,detailRuns=0,heartbeats=0;
+for(let clock=500;clock<=10000;clock+=500){heartbeats++;if(metricClock.detailedStatsDue(clock,lastDetailed)){detailRuns++;lastDetailed=clock;}}
+assert.equal(heartbeats,20);assert.equal(detailRuns,10);
+assert.ok(code.includes('heartbeat(o);if(!collectDetails)continue;'));
+assert.ok(qml.includes('playing: frameCount > 1 && eligible && onScreen && status === AnimationImage.Ready'));
+console.log('Qt playback telemetry: heartbeat/download cadence retained, detailed reads halved, native animation timing unchanged');

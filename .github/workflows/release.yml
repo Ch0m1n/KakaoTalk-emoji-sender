@@ -38,7 +38,7 @@ jobs:
       - name: Sender and lifetime regressions
         shell: pwsh
         run: |
-          ./tools/test-build.ps1 -OutputName "AgitCon-$env:ARCHITECTURE.exe" -Flags @('--qt-transfer-test','--autoplay-integration-test','--dpi-policy-test','--dpi-geometry-test','--ui-zoom-test','--hover-animation-test','--thumbnail-memory-test','--thumbnail-cache-test','--scroll-repaint-test','--arca-search-test','--app-update-test','--longcon-test','--release-self-check','--copy-refresh-test','--preview-paste-test','--attachment-flow-test','--floating-test','--floating-position-test','--draft-test')
+          ./tools/test-build.ps1 -OutputName "AgitCon-$env:ARCHITECTURE.exe" -Flags @('--bundle-test','--photo-native-test','--qt-transfer-test','--autoplay-integration-test','--dpi-policy-test','--dpi-geometry-test','--ui-zoom-test','--hover-animation-test','--thumbnail-memory-test','--thumbnail-cache-test','--scroll-repaint-test','--arca-search-test','--app-update-test','--longcon-test','--release-self-check','--copy-refresh-test','--preview-paste-test','--attachment-flow-test','--floating-test','--floating-position-test','--draft-test')
           python tools/test-import-portable.py
           if($LASTEXITCODE){throw 'Data migration failed'}
           Get-ChildItem autoplay/tools -Filter '*.cjs' | ForEach-Object {node $_.FullName;if($LASTEXITCODE){throw 'Autoplay JS regression failed'}}

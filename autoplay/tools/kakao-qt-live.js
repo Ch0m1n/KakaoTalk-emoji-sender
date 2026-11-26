@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 if(Process.arch!=='x64'||Process.mainModule.name.toLowerCase()!=='kakaotalkui.exe')throw Error('Qt x64 target required');
 const core=Process.getModuleByName('Qt6Core.dll'),gui=Process.getModuleByName('Qt6Gui.dll'),qml=Process.getModuleByName('Qt6Qml.dll'),quick=Process.getModuleByName('Qt6Quick.dll');
 const nf=(m,n,r,a)=>new NativeFunction(m.getExportByName(n),r,a,'win64');
@@ -32,7 +32,7 @@ const user=Process.getModuleByName('user32.dll');
 const enumWindows=nf(user,'EnumWindows','int',['pointer','pointer']);
 const windowPid=nf(user,'GetWindowThreadProcessId','uint',['pointer','pointer']);
 const post=nf(user,'PostMessageW','int',['pointer','uint','pointer','pointer']);
-let hwnd=ptr(0),uiThread=0,result=null,busy=false,lastScan=0,lastBeat=0,stopping=false;
+let hwnd=ptr(0),uiThread=0,result=null,busy=false,lastScan=0,lastBeat=0,lastDetails=0,stopping=false;
 const completedMedia=new Set();
 const tracked=new Map(),stats={engine:'qt6-live',active:0,created:0,frameChanges:0,loops:0,originalsReady:0,errors:[],states:[],stopped:false};
 const getProperty=nf(core,'?property@QObject@@QEBA?AVQVariant@@PEBD@Z','pointer',['pointer','pointer','pointer']);
@@ -43,6 +43,7 @@ const propertyNames=new Map();
 function propName(n){if(!propertyNames.has(n))propertyNames.set(n,Memory.allocUtf8String(n));return propertyNames.get(n);}
 function prop(o,n){const v=Memory.alloc(64),s=Memory.alloc(32);getProperty(o,v,propName(n));try{varStr(v,s);try{return s.add(8).readPointer().readUtf16String(s.add(16).readS64().toNumber());}finally{sd(s);}}finally{varDtor(v);}}
 function numberProperty(o,n,value){const v=Memory.alloc(64);numberVariant(v,value);try{setProperty(o,propName(n),v);}finally{varDtor(v);}}
+function detailedStatsDue(now,last){return now-last>=1000;}
 function heartbeat(o){numberProperty(o,'heartbeat',Date.now());}
 function downloadSlots(rows,now,limit=4){
  const selected=new Set(),keys=new Set();
@@ -115,11 +116,11 @@ const dispatch=Interceptor.attach(user.getExportByName('DispatchMessageW'),{onEn
   if(stopping){for(const o of tracked.values()){if(alive(o))deleteLater(o);forget(o);}stats.active=0;stats.states=[];stats.stopped=true;return;}
   const now=Date.now();
   if(now-lastBeat>=500){
-   lastBeat=now;const beatRows=[];let frameChanges=0,loops=0;
+   lastBeat=now;const beatStart=Date.now(),collectDetails=detailedStatsDue(now,lastDetails);const beatRows=[];let frameChanges=0,loops=0;
    for(const o of tracked.values()){
     if(!alive(o)){stats.destroyed=(stats.destroyed||0)+1;forget(o);continue;}
     if(prop(o,'onScreen')!=='true'){stats.lastHidden={album:prop(o,'album'),eligible:prop(o,'eligible'),viewport:prop(o,'viewportVisible')};deleteLater(o);forget(o);continue;}
-    heartbeat(o);const row={album:prop(o,'album')==='true',format:prop(o,'mediaFormat'),status:prop(o,'status'),originalStatus:Number(prop(o,'originalStatus')),downloadStatus:Number(prop(o,'downloadStatus')),frames:Number(prop(o,'frameCount')),changes:Number(prop(o,'observedFrames')),loops:Number(prop(o,'observedLoops')),playing:prop(o,'playing')==='true',attempts:Number(prop(o,'downloadAttempts')),downloadFailed:prop(o,'downloadFailed')==='true'};
+    heartbeat(o);if(!collectDetails)continue;const row={album:prop(o,'album')==='true',format:prop(o,'mediaFormat'),status:prop(o,'status'),originalStatus:Number(prop(o,'originalStatus')),downloadStatus:Number(prop(o,'downloadStatus')),frames:Number(prop(o,'frameCount')),changes:Number(prop(o,'observedFrames')),loops:Number(prop(o,'observedLoops')),playing:prop(o,'playing')==='true',attempts:Number(prop(o,'downloadAttempts')),downloadFailed:prop(o,'downloadFailed')==='true'};
     if(row.originalStatus===3){const key=prop(o,'mediaKey');if(key&&!completedMedia.has(key)){if(completedMedia.size>=4096)completedMedia.delete(completedMedia.values().next().value);completedMedia.add(key);stats.originalsReady++;}}
     beatRows.push(row);frameChanges+=row.changes;loops+=row.loops;
    }
@@ -129,7 +130,8 @@ const dispatch=Interceptor.attach(user.getExportByName('DispatchMessageW'),{onEn
    for(const r of requests)if(r.granted&&!slots.has(r.id))numberProperty(r.object,'downloadGranted',0);
    for(const r of requests)if(!r.granted&&slots.has(r.id))numberProperty(r.object,'downloadGranted',1);
    stats.downloadPending=requests.filter(r=>r.eligible&&!r.ready).length;stats.downloadInFlight=slots.size;
-   Object.assign(stats,{states:beatRows,frameChanges,loops,active:beatRows.filter(r=>r.playing&&r.frames>1).length});
+   if(collectDetails){lastDetails=now;Object.assign(stats,{states:beatRows,frameChanges,loops,active:beatRows.filter(r=>r.playing&&r.frames>1).length});}
+   stats.beatMs=Date.now()-beatStart;stats.statsIntervalMs=1000;
   }
   if(now-lastScan>=3000){lastScan=now;const start=Date.now(),r=visit();stats.scanMs=Date.now()-start;stats.scanned=r.counts.objects;stats.photoCandidates=r.counts.thumbnails;stats.candidates=r.counts.photoStates.map(s=>{try{return JSON.parse(s);}catch(_){return {invalid:true};}});}
  }catch(e){error(e);}finally{busy=false;}

@@ -282,8 +282,9 @@ namespace AgitCon {
         internal static void TestCopyRefreshRace(){
             string report=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"copy-refresh-test.txt");int count=0;Action<bool> check=b=>{if(!b)throw new Exception("Copy refresh race check "+count);count++;};
             try{using(var form=new MainForm(true)){
-                check(form.collectionButton.Size==form.doubleButton.Size);
+                check(form.collectionButton.Size==form.doubleButton.Size);int statusChanges=0;form.targetLabel.TextChanged+=(sender,args)=>statusChanges++;for(int i=0;i<30;i++)form.SetTargetStatus("stable status");check(statusChanges==1);
                 form.follow.Checked=true;form.PrepareManualOpen();check(!form.follow.Checked&&!form.compact&&!form.TopMost);form.follow.Checked=true;check(form.compact&&form.TopMost);form.follow.Checked=false;
+                form.anchor=new ChatAnchor{Window=IntPtr.Zero};check(!form.HideUnavailableFloatingAnchor());form.follow.Checked=true;form.modal=true;form.movingPalette=true;check(form.HideUnavailableFloatingAnchor());form.modal=false;form.movingPalette=false;form.anchor=null;check(!form.HideUnavailableFloatingAnchor());form.follow.Checked=false;
                 form.collected.Add(new Entry{DisplayName="first"});form.collected.Add(new Entry{DisplayName="second"});
                 form.CompleteCollectionAttachment(false,true,form.collected.ToList());check(form.collected.Count==2);
                 form.CompleteCollectionAttachment(true,true,form.collected.ToList());check(form.collected.Count==0);
@@ -509,17 +510,26 @@ namespace AgitCon {
             if(libraryMode)SetLibraryMode(false,true);else Render();
             Tell("카톡 작성 문장으로 추천 중 · 검색창에 직접 입력해도 돼요.");
         }finally{draftProbeBusy=false;}}
+        void SetTargetStatus(string text){if(targetLabel.Text!=text)targetLabel.Text=text;}
+        bool HideUnavailableFloatingAnchor(){if(!follow.Checked||anchor==null||ChatFloating.DisplayAvailable(anchor))return false;if(Visible)Hide();return true;}
         void TickWatch() {
-            if(previewOnly||modal||IsDisposed)return;
+            if(previewOnly||IsDisposed)return;
+            if(!modal&&Program.ShowRequest!=null&&Program.ShowRequest.WaitOne(0)){Open();return;}
+            // Visibility follows the bound room even while a picker, modal form or drag pauses observation.
+            if(HideUnavailableFloatingAnchor()){
+                IntPtr nextForeground=Native.GetForegroundWindow();
+                if(!Native.IsKakao(nextForeground)||ChatFloating.FindPalette(nextForeground)==null)return;
+                anchor=null;
+            }
+            if(modal)return;
             if(previewPaste.FileAttachmentInProgress)return;
             if(SplitWindowForeground(collectionWindow,Native.GetForegroundWindow())||SplitWindowForeground(longWindow,Native.GetForegroundWindow()))return;
             previewPaste.Observe();
             ObserveDraft();
-            if(config!=null&&config.ImagePastePreview!=false)targetLabel.Text=previewPaste.Status;
-            if(Program.ShowRequest!=null&&Program.ShowRequest.WaitOne(0)){Open();return;}
+            if(config!=null&&config.ImagePastePreview!=false)SetTargetStatus(previewPaste.Status);
             IntPtr foreground=Native.GetForegroundWindow();
             if(movingPalette)return;
-            if(follow.Checked){if(Native.IsKakao(foreground)&&!Native.IsIconic(foreground)){var next=ChatFloating.FindPalette(foreground);if(next==null){if(Visible)Hide();return;}BindRoom(next);if(next.Editor==IntPtr.Zero)targetLabel.Text="카톡 창에 연결됨 · 입력창 확인 전에는 복사만 해요";DockToTarget();if(!Visible)Show();}
+            if(follow.Checked){if(Native.IsKakao(foreground)&&!Native.IsIconic(foreground)){var next=ChatFloating.FindPalette(foreground);if(next==null){if(Visible)Hide();return;}BindRoom(next);DockToTarget();if(!Visible)Show();}
                 else if(foreground==Handle||ContainsFocus||(collectionWindow!=null&&!collectionWindow.IsDisposed&&collectionWindow.ContainsFocus)){if(anchor!=null){if(!ChatFloating.Current(anchor)){if(Visible)Hide();return;}var next=ChatFloating.FindPalette(anchor.Window);if(next!=null){BindRoom(next);DockToTarget();}else if(Visible)Hide();}}
                 else if(Visible)Hide();return;}
             if(Native.IsKakao(foreground)&&!Native.IsIconic(foreground)) {

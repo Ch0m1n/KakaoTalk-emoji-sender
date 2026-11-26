@@ -6,6 +6,11 @@ using System.Windows.Automation.Text;
 namespace AgitCon {
     // Qt exposes editable accessibility elements instead of native RichEdit HWNDs.
     // Read metadata and selection endpoints only, never editor values or history text.
+    internal sealed class QtObservationBudget {
+        string context;DateTime focusDue,treeDue;
+        internal void FocusChanged(){focusDue=DateTime.MinValue;}
+        internal bool Begin(string next,DateTime now,out bool tree){tree=false;if(context!=next){context=next;focusDue=treeDue=DateTime.MinValue;}if(now<focusDue)return false;focusDue=now.AddMilliseconds(750);tree=now>=treeDue;if(tree)treeDue=now.AddSeconds(3);return true;}
+    }
     internal static class QtComposer {
         internal static string Identity(AutomationElement element){try{var id=element.GetRuntimeId();return id==null||id.Length==0?null:String.Join(":",id.Select(x=>x.ToString()).ToArray());}catch{return null;}}
         static bool Belongs(AutomationElement element,IntPtr window,uint process){
@@ -39,9 +44,9 @@ namespace AgitCon {
                 return Geometry(chat,r);
             }catch{return false;}
         }
-        internal static AutomationElement Find(IntPtr window,uint process){
+        internal static AutomationElement Find(IntPtr window,uint process,bool searchTree=true){
             try{
-                var focused=AutomationElement.FocusedElement;if(Candidate(focused,window,process))return focused;
+                var focused=AutomationElement.FocusedElement;if(Candidate(focused,window,process))return focused;if(!searchTree)return null;
                 var root=AutomationElement.FromHandle(window);
                 var edits=root.FindAll(TreeScope.Descendants,new AndCondition(new PropertyCondition(AutomationElement.ControlTypeProperty,ControlType.Edit),new PropertyCondition(AutomationElement.IsEnabledProperty,true),new PropertyCondition(AutomationElement.IsKeyboardFocusableProperty,true)));
                 AutomationElement found=null;

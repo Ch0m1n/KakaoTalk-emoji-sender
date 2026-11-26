@@ -30,6 +30,26 @@ namespace AgitCon {
    };
    var outcome=await LongFlow.Run(ready.Parts.Count,checks,token);if(trace!=null)trace(outcome.Requested,"qt-"+outcome.Stage+"/pasted="+outcome.Pasted+"/ui="+qtTransferProblem);return outcome;
   }
+  sealed class QtFileChoice {internal IntPtr Native;internal QtPicker Picker;internal PreviewPasteResult Result;}
+  async Task<QtFileChoice> SelectQtFiles(PreviewChatTarget target,CancellationToken token,string names,IntPtr source){
+   var result=new PreviewPasteResult{Stage="qt-file-select",Reason="신형 파일 선택창을 확인하지 못했어요."};
+   if(!Valid(target)||Native.GetForegroundWindow()!=source||!Own(source)){result.Block="target/not-current";return new QtFileChoice{Result=result};}
+   if(PhotoDialogs(target).Count!=0||QtPickers(target).Count!=0){result.Block="dialog/already-open";return new QtFileChoice{Result=result};}
+   RememberFileDialogs(target);qtPickerTransition=true;photoFocusLost=false;photoTarget=target;FileAttachmentInProgress=true;
+   Func<bool> context=()=>!disposed&&!token.IsCancellationRequested&&!photoFocusLost&&SameRoom(target)&&(Native.GetForegroundWindow()==source||Native.GetForegroundWindow()==target.Window||OwnedByRoom(Native.GetForegroundWindow(),target)||NewFileDialogTransition(Native.GetForegroundWindow(),target));
+   var checks=new PasteChecks{SourceCurrent=()=>context()&&Native.GetForegroundWindow()==source,TargetCurrent=()=>Valid(target),ClipboardCurrent=()=>true,ModifiersReleased=()=>Control.ModifierKeys==Keys.None,TargetFocused=()=>IsFocused(target),SelectionProblem=()=>{string reason;return ComposerSelection(target,out reason)?null:reason;},Activate=()=>{transition=true;return ActivateComposer(target);},Pause=t=>Task.Delay(20,t),Send=()=>{var keys=FileDialogKeys();return SendQtChord(keys);}};
+   var opened=await PasteFlow.Execute(checks,token);if(!opened.Requested)return new QtFileChoice{Result=opened};
+   IntPtr native=IntPtr.Zero;QtPicker picker=null;var clock=Stopwatch.StartNew();
+   while(clock.ElapsedMilliseconds<3000){token.ThrowIfCancellationRequested();if(!context()){result.Block="focus/foreign-window";return new QtFileChoice{Result=result};}var natives=PhotoDialogs(target);var quick=QtPickers(target);if(natives.Count+quick.Count>1){result.Block="dialog/ambiguous";return new QtFileChoice{Result=result};}if(natives.Count==1){native=natives[0];break;}if(quick.Count==1){picker=quick[0];break;}await Task.Delay(35,token);}
+   if(native==IntPtr.Zero&&picker==null){result.Block="dialog/not-found";result.Reason="신형 카톡 파일 선택창을 찾지 못했어요. Ctrl+T로 직접 첨부해주세요.";return new QtFileChoice{Result=result};}
+   if(!context()||(native!=IntPtr.Zero?Native.GetForegroundWindow()!=native||!SetFilename(native,names):!SetQtFilename(picker,target,names))){result.Block="filename/unavailable-or-nonempty";result.Reason="파일 선택창은 열었지만 이름 칸을 확인하지 못했어요. 기존 입력은 덮어쓰지 않았어요.";return new QtFileChoice{Result=result};}
+   return new QtFileChoice{Native=native,Picker=picker};
+  }
+  async Task<PreviewPasteResult> TryQtFileSelection(PreviewChatTarget target,CancellationToken token,IList<string> paths,IntPtr source,int expected){
+   string names=AttachmentFileNames(paths,expected);var selection=await SelectQtFiles(target,token,names,source);if(selection.Result!=null)return selection.Result;
+   // Multi-file batching deliberately stops before Open and Send, just like the classic route.
+   return new PreviewPasteResult{Requested=true,Stage="qt-files-selected-manual-open",Reason="이미지 "+expected+"개를 지정했어요. ‘열기’를 직접 누르고 묶음과 순서를 확인해주세요. 전송도 직접 눌러주세요."};
+  }
   async Task<PreviewPasteResult> TryQtPhotoAttach(PreviewChatTarget target,CancellationToken token,string path,IntPtr source,bool direct,bool verificationOnly){
    var result=new PreviewPasteResult{Stage="qt-file-prepare",Reason="신형 카톡의 파일 첨부 대상을 확인하지 못했어요. GIF 파일은 복사되어 있어요."};
    if(!Valid(target)||Native.GetForegroundWindow()!=source||!Own(source)){result.Block="target/not-current";return result;}
@@ -38,15 +58,8 @@ namespace AgitCon {
    int confirmation=direct?0:await ConfirmationState(target.ProcessId,token);
    if(verificationOnly)return new PreviewPasteResult{Stage="qt-confirmation-only",Reason=confirmation==1?"verified":"not-verified",Block=confirmation==1?null:"settings/no-proof"};
    if(PhotoDialogs(target).Count!=0||QtPickers(target).Count!=0||QtPreviews(target,QtTransferKind.File,path).Count!=0){result.Block="dialog/already-open";return result;}
-   RememberFileDialogs(target);qtPickerTransition=true;photoFocusLost=false;photoTarget=target;FileAttachmentInProgress=true;
+   string full=Path.GetFullPath(path);var choice=await SelectQtFiles(target,token,full,source);if(choice.Result!=null)return choice.Result;IntPtr native=choice.Native;QtPicker picker=choice.Picker;
    Func<bool> context=()=>!disposed&&!token.IsCancellationRequested&&!photoFocusLost&&SameRoom(target)&&(Native.GetForegroundWindow()==source||Native.GetForegroundWindow()==target.Window||OwnedByRoom(Native.GetForegroundWindow(),target)||NewFileDialogTransition(Native.GetForegroundWindow(),target));
-   var checks=new PasteChecks{SourceCurrent=()=>context()&&Native.GetForegroundWindow()==source,TargetCurrent=()=>Valid(target),ClipboardCurrent=()=>true,ModifiersReleased=()=>Control.ModifierKeys==Keys.None,TargetFocused=()=>IsFocused(target),SelectionProblem=()=>{string reason;return ComposerSelection(target,out reason)?null:reason;},Activate=()=>{transition=true;return ActivateComposer(target);},Pause=t=>Task.Delay(20,t),Send=()=>{var keys=FileDialogKeys();return SendQtChord(keys);}};
-   var opened=await PasteFlow.Execute(checks,token);if(!opened.Requested)return opened;
-   IntPtr native=IntPtr.Zero;QtPicker picker=null;var clock=Stopwatch.StartNew();
-   while(clock.ElapsedMilliseconds<3000){token.ThrowIfCancellationRequested();if(!context()){result.Block="focus/foreign-window";return result;}var natives=PhotoDialogs(target);var quick=QtPickers(target);if(natives.Count+quick.Count>1){result.Block="dialog/ambiguous";return result;}if(natives.Count==1){native=natives[0];break;}if(quick.Count==1){picker=quick[0];break;}await Task.Delay(35,token);}
-   string full=Path.GetFullPath(path);
-   if(native==IntPtr.Zero&&picker==null){result.Block="dialog/not-found";result.Reason="신형 카톡 파일 선택창을 찾지 못했어요. Ctrl+T로 직접 첨부해주세요.";return result;}
-   if(!context()||(native!=IntPtr.Zero?Native.GetForegroundWindow()!=native||!SetFilename(native,full):!SetQtFilename(picker,target,full))){result.Block="filename/unavailable-or-nonempty";result.Reason="파일 선택창은 열었지만 이름 칸을 확인하지 못했어요. 기존 입력은 덮어쓰지 않았어요.";return result;}
    if(!direct&&confirmation!=1){return new PreviewPasteResult{Requested=true,Stage="qt-file-selected-manual-open",Reason="GIF 파일을 지정했어요. 전송 전 확인 설정을 읽지 못해 ‘열기’는 직접 눌러주세요. ‘전송’은 자동으로 누르지 않아요."};}
    for(int attempt=0;attempt<40;attempt++){token.ThrowIfCancellationRequested();if(!context())break;bool enabled=native!=IntPtr.Zero?IsWindowEnabled(GetDlgItem(native,1)):UiVisible(picker.Open);if(enabled)break;await Task.Delay(20,token);}
    bool requested=false;
@@ -54,7 +67,7 @@ namespace AgitCon {
    if(!requested){result.Stage="qt-open-unconfirmed";result.Block="open/result-unknown";result.Reason="열기 요청 결과가 불확실해 멈췄어요. 자동 재시도는 하지 않아요.";return result;}
    bool saw=false;
    if(direct){return await FinishDirect(new DirectChecks{Current=()=>context()&&gifDirectSend,PickerClosed=()=>native!=IntPtr.Zero?!Native.IsWindow(native)||!IsWindowVisible(native):!UiVisible(picker.Surface),SawConfirmation=()=>saw,FindSend=()=>{var found=QtPreviews(target,QtTransferKind.File,path);if(found.Count>1)return Tuple.Create(true,(Func<bool>)null);if(found.Count==0)return Tuple.Create(false,(Func<bool>)null);saw=true;var proof=found[0];return Tuple.Create(false,(Func<bool>)(()=>ConfirmQtPreview(proof,()=>context()&&gifDirectSend&&Control.ModifierKeys==Keys.None)));},Pause=t=>Task.Delay(35,t)},token);}
-   clock.Restart();while(clock.ElapsedMilliseconds<2500){token.ThrowIfCancellationRequested();if(!context())break;var found=QtPreviews(target,QtTransferKind.File,path);if(found.Count>1)break;if(found.Count==1)return new PreviewPasteResult{Requested=true,Stage="qt-file-preview",Reason="GIF 원본을 파일 전송 확인창에 첨부했어요. 전송은 직접 눌러주세요."};await Task.Delay(35,token);}
+   var clock=Stopwatch.StartNew();while(clock.ElapsedMilliseconds<2500){token.ThrowIfCancellationRequested();if(!context())break;var found=QtPreviews(target,QtTransferKind.File,path);if(found.Count>1)break;if(found.Count==1)return new PreviewPasteResult{Requested=true,Stage="qt-file-preview",Reason="GIF 원본을 파일 전송 확인창에 첨부했어요. 전송은 직접 눌러주세요."};await Task.Delay(35,token);}
    return new PreviewPasteResult{Stage="qt-open-result-unknown",Block="preview/not-proved/"+qtTransferProblem,Reason="GIF 열기를 요청했지만 파일 전송 확인창은 확인하지 못했어요. 카톡에서 결과를 확인해주세요. 자동 재시도는 하지 않아요."};
   }
  }
