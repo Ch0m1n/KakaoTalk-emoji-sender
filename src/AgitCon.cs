@@ -31,6 +31,7 @@ namespace AgitCon {
         [DataMember] public List<Entry> Entries = new List<Entry>();
         [DataMember] public List<PackRecord> Packs = new List<PackRecord>();
         [DataMember] public bool UseSemantic;
+        [DataMember] public bool AutoPlayOnLaunch;
         [DataMember] public bool? PreloadThumbnails;
         [DataMember] public bool OcrSetupPrompted;
         [DataMember] public bool SemanticPowerSaving;
@@ -127,6 +128,10 @@ namespace AgitCon {
     }
     public class MainForm:Form {
         Settings config;
+        AutoPlayForm autoPlay;
+        void OpenAutoPlay(){EnsureAutoPlay();autoPlay.RestoreWindow();}
+        void EnsureAutoPlay(){if(autoPlay!=null&&!autoPlay.IsDisposed)return;autoPlay=new AutoPlayForm(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"codecs/autoplay"));autoPlay.ConfigureIntegrated(()=>{using(var f=new AppUpdateForm(ExitForUpdate))f.ShowDialog(this);},value=>{config.AutoPlayOnLaunch=value;Save();});}
+
         List<Entry> entries=new List<Entry>(), candidates=new List<Entry>();
         TextBox search=new TextBox(), aliases=new TextBox();
         Label status=new Label(), targetLabel=new Label(), detail=new Label();
@@ -204,12 +209,12 @@ namespace AgitCon {
             status.Dock=DockStyle.Fill;status.ForeColor=Ui.Muted;status.Font=Ui.Regular(9);status.Text="카톡 입력창 클릭 → 정지 콘 선택 → 첨부 미리보기\n대상이 불확실하면 이미지 복사만 해요. 전송은 직접 해주세요."; layout.Controls.Add(status,0,9);
             tray=new NotifyIcon {Icon=Ui.AppIcon(16),Text="아지트콘 — 로컬 콘 검색",Visible=!visualPreview};
             var menu=new ContextMenuStrip(); menu.Items.Add("아지트콘 열기",null,(s,e)=>Open());menu.Items.Add("입력창 옆 플로팅으로 돌아가기",null,(s,e)=>{follow.Checked=true;TickWatch();});menu.Items.Add("로컬 폴더 관리",null,(s,e)=>{Open();ManageFolders();});
-            menu.Items.Add("로컬 폴더 추가",null,(s,e)=>{Open();PickFolder();});menu.Items.Add("로컬 의미 검색 설정",null,(s,e)=>{Open();OpenSettings();});
+            menu.Items.Add("움짤 자동재생",null,(s,e)=>OpenAutoPlay());menu.Items.Add("로컬 폴더 추가",null,(s,e)=>{Open();PickFolder();});menu.Items.Add("로컬 의미 검색 설정",null,(s,e)=>{Open();OpenSettings();});
             menu.Items.Add("플로팅 위치 자동 배치로 초기화",null,(s,e)=>{roomPositions.Clear();config.FloatingPosition=null;Save();if(compact)DockToTarget();Tell("플로팅 위치를 자동 배치로 되돌렸어요.");});
             var pasteMenu=new ToolStripMenuItem("콘 선택 시 카톡 첨부 미리보기"){CheckOnClick=true};menu.Opening+=(s,e)=>pasteMenu.Checked=config!=null&&config.ImagePastePreview!=false;pasteMenu.Click+=(s,e)=>{config.ImagePastePreview=pasteMenu.Checked;Save();};menu.Items.Add(pasteMenu);
             menu.Items.Add("종료",null,(s,e)=>{shutdown=true;Close();}); tray.ContextMenuStrip=menu; tray.DoubleClick+=(s,e)=>Open();
             FormClosing+=(s,e)=>{if(!shutdown && e.CloseReason==CloseReason.UserClosing){e.Cancel=true;Hide();}};
-            FormClosed+=(s,e)=>{previewRequests.Cancel();if(copyRequest!=null)copyRequest.Cancel();if(semanticRequest!=null)semanticRequest.Cancel();previewIndexer.Dispose();FlushPreviewSave();previewSave.Dispose();catalogIndexer.Dispose();indexRefresh.Dispose();semantic.Dispose();previewPaste.Dispose();watch.Stop();tray.Dispose();ClearRows();};
+            FormClosed+=(s,e)=>{if(autoPlay!=null&&!autoPlay.IsDisposed)autoPlay.ShutdownIntegrated();previewRequests.Cancel();if(copyRequest!=null)copyRequest.Cancel();if(semanticRequest!=null)semanticRequest.Cancel();previewIndexer.Dispose();FlushPreviewSave();previewSave.Dispose();catalogIndexer.Dispose();indexRefresh.Dispose();semantic.Dispose();previewPaste.Dispose();watch.Stop();tray.Dispose();ClearRows();};
             try {config=Catalog.Load();} catch(Exception ex) {config=new Settings(); MessageBox.Show("설정 파일을 읽지 못했어요. 원본 보존을 위해 앱을 종료해요.\n"+ex.Message);shutdown=true; Shown+=(s,e)=>Close();return;}
             Action<uint,long> verifiedGif=(pid,start)=>{config.GifConfirmedProcess=pid;config.GifConfirmedStart=start;Save();};
             Action suspendGif=()=>{config.GifAutoOpen=false;config.GifConfirmedProcess=0;config.GifConfirmedStart=0;Save();};
@@ -227,7 +232,7 @@ namespace AgitCon {
             ResizeBegin+=(s,e)=>{movingPalette=true;dragStart=Location;dragRoom=compact&&anchor!=null?anchor.Key:null;};
             ResizeEnd+=(s,e)=>{movingPalette=false;if(compact&&anchor!=null&&dragRoom==anchor.Key&&Location!=dragStart&&ChatFloating.Current(anchor)){var fresh=ChatFloating.Find(anchor.Window);if(fresh!=null){anchor=fresh;var offset=FloatingOffset.From(anchor.InputRect,Location);roomPositions[anchor.Key]=offset;config.FloatingPosition=offset;Save();Tell("플로팅 위치를 기억했어요 · 제목 표시줄을 끌어 다시 바꿀 수 있어요.");}}dragRoom=null;if(compact)DockToTarget();};
             VisibleChanged+=(s,e)=>{if(Visible){if(!refreshing)Render();}else{previewRequests.Cancel();if(copyRequest!=null)copyRequest.Cancel();if(semanticRequest!=null)semanticRequest.Cancel();if(collectionWindow!=null&&!collectionWindow.IsDisposed)collectionWindow.Hide();}};
-            Shown+=async(s,e)=>{Rescan();TickWatch();if(!previewOnly)await CheckOcrAtStartup();};
+            Shown+=async(s,e)=>{if(config.AutoPlayOnLaunch&&!previewOnly){EnsureAutoPlay();await autoPlay.ResumeIntegrated();}Rescan();TickWatch();if(!previewOnly)await CheckOcrAtStartup();};
         }
         async Task CheckOcrAtStartup(){if(config.GifDirectSend)return;var result=await OcrSupport.CheckAsync();if(IsDisposed||shutdown||modal||copyRequest!=null||!OcrSupport.ShouldPrompt(config.OcrSetupPrompted,result))return;modal=true;try{using(var setup=new OcrSetupForm(result))setup.ShowDialog(this);config.OcrSetupPrompted=true;Save();}finally{modal=false;}}
         void SetGifDirectSend(bool enabled){config.GifDirectSend=enabled;if(enabled)config.ImagePastePreview=true;previewPaste.ConfigureGifDirectSend(enabled);Save();Tell(enabled?"움짤 바로 전송 켜짐 · 클릭하면 설정 확인 없이 파일을 열고 전송을 요청해요.":"움짤 바로 전송 꺼짐 · 전송은 직접 해주세요.");}
@@ -258,8 +263,8 @@ namespace AgitCon {
         void Tell(string text) {status.Text=text;if(collectionWindow!=null&&!collectionWindow.IsDisposed&&collectionWindow.Visible)collectionWindow.ShowStatus(text);}
         void Save() {if(previewOnly)return;try{Catalog.Save(config);}catch(Exception ex){Tell("저장 실패: "+ex.Message);}}
         void UpdateSearchCue(){Ui.Cue(search,config!=null&&config.AutoDraftRecommendations?"직접 검색 · 비워두면 카톡 문장 추천":"콘 이름, 별칭, 팩으로 검색");}
-        async void ExitForUpdate(){BeginStickerSelection();if(longWindow!=null&&!longWindow.IsDisposed){longWindow.CancelForUpdate();for(int i=0;i<100&&longWindow.Busy;i++)await Task.Delay(100);if(longWindow.Busy){Tell("롱콘 중단 후 업데이트를 다시 실행해주세요.");return;}longWindow.Close();}shutdown=true;Close();}
-        void OpenSettings(){BeginStickerSelection();modal=true;try{using(var settings=new SemanticSettingsForm(config.UseSemantic,value=>{config.UseSemantic=value;Save();if(!value){if(semanticRequest!=null)semanticRequest.Cancel();semanticVersion++;catalogIndexer.Stop();ClearDraft(false);semantic.Dispose();}},config.AutoDraftRecommendations,value=>{config.AutoDraftRecommendations=value;ClearDraft(false);Save();UpdateSearchCue();},config.SemanticPowerSaving,value=>{config.SemanticPowerSaving=value;semantic.PowerSaving=value;Save();},config.AutomaticDescriptions,value=>{catalogIndexer.Stop();config.AutomaticDescriptions=value;semantic.AutomaticAnalysis=value;if(semanticRequest!=null)semanticRequest.Cancel();semanticVersion++;Save();})){settings.AddThumbnailSettings(config.PreloadThumbnails!=false,value=>{config.PreloadThumbnails=value;Save();if(value)QueuePreviews(true);else StopPreviews();},()=>QueuePreviews(true),StopPreviews,()=>cacheProgress+"\n메모리: "+SharedPreviews.Status,()=>previewTotal==0?0:(previewDone+previewFailed)*100/previewTotal,()=>previewRunning);settings.AddOcrSettings(config.GifDirectSend,SetGifDirectSend);UiZoom.AddSettings(settings,follow.Checked,value=>follow.Checked=value,config.UiScalePercent,value=>{config.UiScalePercent=value;Save();},()=>{roomPositions.Clear();config.FloatingPosition=null;Save();if(compact)DockToTarget();});CacheMaintenance.AddTab(settings,flags=>{CacheMaintenance.Schedule(AppDomain.CurrentDomain.BaseDirectory,flags);if((flags&CacheMaintenance.Downloaded)!=0){StopPreviews();catalogIndexer.Stop();config.PreloadThumbnails=false;config.AutomaticDescriptions=false;semantic.AutomaticAnalysis=false;Save();}});AppUpdateForm.AddTab(settings,ExitForUpdate);settings.ShowDialog(this);}}finally{modal=false;if(!shutdown&&!IsDisposed){if(!previewRunning)StartSemanticIndex();Render();}}}
+        async void ExitForUpdate(){BeginStickerSelection();if(longWindow!=null&&!longWindow.IsDisposed){longWindow.CancelForUpdate();for(int i=0;i<100&&longWindow.Busy;i++)await Task.Delay(100);if(longWindow.Busy){Tell("롱콘 중단 후 업데이트를 다시 실행해주세요.");return;}longWindow.Close();}if(autoPlay!=null&&!autoPlay.IsDisposed){autoPlay.ShutdownIntegrated();if(!await AutoPlaySettings.WaitStopped()){Tell("자동재생 정리가 끝나지 않았어요. 잠시 뒤 업데이트를 다시 시도해주세요.");return;}}shutdown=true;Close();}
+        void OpenSettings(){BeginStickerSelection();modal=true;try{using(var settings=new SemanticSettingsForm(config.UseSemantic,value=>{config.UseSemantic=value;Save();if(!value){if(semanticRequest!=null)semanticRequest.Cancel();semanticVersion++;catalogIndexer.Stop();ClearDraft(false);semantic.Dispose();}},config.AutoDraftRecommendations,value=>{config.AutoDraftRecommendations=value;ClearDraft(false);Save();UpdateSearchCue();},config.SemanticPowerSaving,value=>{config.SemanticPowerSaving=value;semantic.PowerSaving=value;Save();},config.AutomaticDescriptions,value=>{catalogIndexer.Stop();config.AutomaticDescriptions=value;semantic.AutomaticAnalysis=value;if(semanticRequest!=null)semanticRequest.Cancel();semanticVersion++;Save();})){settings.AddThumbnailSettings(config.PreloadThumbnails!=false,value=>{config.PreloadThumbnails=value;Save();if(value)QueuePreviews(true);else StopPreviews();},()=>QueuePreviews(true),StopPreviews,()=>cacheProgress+"\n메모리: "+SharedPreviews.Status,()=>previewTotal==0?0:(previewDone+previewFailed)*100/previewTotal,()=>previewRunning);settings.AddOcrSettings(config.GifDirectSend,SetGifDirectSend);UiZoom.AddSettings(settings,follow.Checked,value=>follow.Checked=value,config.UiScalePercent,value=>{config.UiScalePercent=value;Save();},()=>{roomPositions.Clear();config.FloatingPosition=null;Save();if(compact)DockToTarget();});CacheMaintenance.AddTab(settings,flags=>{CacheMaintenance.Schedule(AppDomain.CurrentDomain.BaseDirectory,flags);if((flags&CacheMaintenance.Downloaded)!=0){StopPreviews();catalogIndexer.Stop();config.PreloadThumbnails=false;config.AutomaticDescriptions=false;semantic.AutomaticAnalysis=false;Save();}});AutoPlaySettings.AddTab(settings,OpenAutoPlay,config.AutoPlayOnLaunch,value=>{config.AutoPlayOnLaunch=value;Save();});AppUpdateForm.AddTab(settings,ExitForUpdate);settings.ShowDialog(this);}}finally{modal=false;if(!shutdown&&!IsDisposed){if(!previewRunning)StartSemanticIndex();Render();}}}
         void FinishCopy(CancellationTokenSource request,bool collection){if(copyRequest==request){if(collection&&collectionWindow!=null&&!collectionWindow.IsDisposed)collectionWindow.SetBusy(false);copyRequest=null;}request.Dispose();}
         bool AutomaticResultCurrent(int generation,bool draft){return copyRequest==null&&!(draft&&libraryMode&&libraryPinned)&&generation==(draft?draftGeneration:semanticVersion);}
         bool RefreshIndexedRecommendations(){if(IsDisposed||modal||refreshing||libraryMode||copyRequest!=null)return false;Render();return true;}
@@ -649,6 +654,7 @@ namespace AgitCon {
             if(args.Contains("--cache-maintenance-test")){CacheMaintenance.Test();return;}
             if(args.Contains("--ui-zoom-test")){UiZoom.Test();return;}
             if(args.Contains("--arca-search-test")){ArcaSearchTests.Run();return;}
+            if(args.Contains("--autoplay-integration-test")){AutoPlaySettings.Test();return;}
             if(args.Contains("--app-update-test")){try{AppUpdateTests.Run();}catch(Exception ex){File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"app-update-error.txt"),ex.ToString());Environment.ExitCode=1;}return;}
             if(args.Contains("--longcon-vision-test")){PreviewPaste.TestLongVision();return;}
             if(args.Contains("--longcon-test")){LongConTests.Run();return;}

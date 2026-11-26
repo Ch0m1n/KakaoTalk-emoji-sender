@@ -3,42 +3,83 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   windows:
     runs-on: windows-2022
-    permissions:
-      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: [x86, x64]
+    env:
+      ARCHITECTURE: ${{ matrix.architecture }}
+      PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           architecture: x64
-      - run: python tools/prepare-build.py
-      - shell: pwsh
-        run: ./build.ps1
-      - shell: pwsh
-        run: |
-          ./tools/test-build.ps1 -Flags @('--dpi-policy-test','--dpi-geometry-test','--ui-zoom-test','--hover-animation-test','--thumbnail-memory-test','--thumbnail-cache-test','--scroll-repaint-test','--arca-search-test','--app-update-test','--longcon-test','--ui-zoom-test','--release-self-check','--copy-refresh-test')
-          ./tools/test-update.ps1
-          ./tools/test-updater-handoff.ps1
-      - run: python tools/package-release.py
-      - if: startsWith(github.ref, 'refs/tags/v')
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Prepare and build selected architecture
         shell: pwsh
+        run: |
+          python tools/prepare-build.py
+          if($LASTEXITCODE){throw 'SDK preparation failed'}
+          python tools/prepare-platform.py $env:ARCHITECTURE
+          if($LASTEXITCODE){throw 'Platform preparation failed'}
+          ./build.ps1 -Architecture $env:ARCHITECTURE -OutputName "AgitCon-$env:ARCHITECTURE.exe"
+      - name: Sender and lifetime regressions
+        shell: pwsh
+        run: |
+          ./tools/test-build.ps1 -OutputName "AgitCon-$env:ARCHITECTURE.exe" -Flags @('--autoplay-integration-test','--dpi-policy-test','--dpi-geometry-test','--ui-zoom-test','--hover-animation-test','--thumbnail-memory-test','--thumbnail-cache-test','--scroll-repaint-test','--arca-search-test','--app-update-test','--longcon-test','--release-self-check','--copy-refresh-test','--preview-paste-test','--attachment-flow-test')
+          python tools/test-import-portable.py
+          if($LASTEXITCODE){throw 'Data migration failed'}
+          Get-ChildItem autoplay/tools -Filter '*.cjs' | ForEach-Object {node $_.FullName;if($LASTEXITCODE){throw 'Autoplay JS regression failed'}}
+      - name: Package and test native engine
+        shell: pwsh
+        run: |
+          python tools/package-release.py --architecture $env:ARCHITECTURE
+          if($LASTEXITCODE){throw 'Packaging failed'}
+          python tools/test-unified.py $env:ARCHITECTURE
+          if($LASTEXITCODE){throw 'Native engine regression failed'}
+      - name: Build and test installer
+        shell: pwsh
+        run: |
+          ./tools/prepare-installer.ps1
+          ./tools/build-installer.ps1 -Architecture $env:ARCHITECTURE
+          ./tools/test-installer.ps1 -Architecture $env:ARCHITECTURE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AgitCon-${{ matrix.architecture }}
+          path: releases/*/*
+          if-no-files-found: error
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: windows
+    runs-on: windows-2022
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: AgitCon-*
+          merge-multiple: true
+          path: release-assets
+      - shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $version=(Get-Content version.json -Raw | ConvertFrom-Json).version
-          if($env:GITHUB_REF_NAME -cne "v$version"){throw 'Tag and package version must match.'}
-          gh release create $env:GITHUB_REF_NAME "releases/$version/AgitCon-win-x64.zip" "releases/$version/AgitCon-win-x64.zip.sha256" --verify-tag --title "AgitCon $version" --generate-notes
-      - if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-        shell: pwsh
-        run: |
-          $csc=Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
-          & $csc /nologo /target:exe /platform:x64 /reference:System.dll /reference:System.Core.dll /reference:System.Runtime.Serialization.dll /reference:System.IO.Compression.dll /reference:System.IO.Compression.FileSystem.dll "/out:$(Join-Path $PWD 'artifacts/tests/VerifyPublishedUpdate.exe')" (Join-Path $PWD 'src/AppUpdateCore.cs') (Join-Path $PWD 'tools/VerifyPublishedUpdate.cs')
-          if($LASTEXITCODE){throw 'Release check compilation failed'}
-          & ./artifacts/tests/VerifyPublishedUpdate.exe (Join-Path $PWD 'artifacts/tests/public-release')
-          if($LASTEXITCODE){throw 'Published update validation failed'}
+          $version=(Get-Content version.json -Raw|ConvertFrom-Json).version
+          if($env:GITHUB_REF_NAME -cne "v$version"){throw 'Tag and package version mismatch'}
+          $assets=Get-ChildItem release-assets -File
+          if($assets.Count -ne 8){throw 'Both installers, updater ZIPs and hashes must be present'}
+          gh release create $env:GITHUB_REF_NAME @($assets.FullName) --verify-tag --title "AgitCon $version" --notes-file docs/RELEASE.md
+          if($LASTEXITCODE){throw 'Release publication failed'}

@@ -1,4 +1,4 @@
-﻿param([string]$OutputName = 'AgitCon-next.exe', [switch]$StagePayload, [switch]$DeveloperTests)
+﻿param([string]$OutputName = 'AgitCon-next.exe', [switch]$StagePayload, [switch]$DeveloperTests, [ValidateSet('x86','x64')][string]$Architecture='x64')
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $csc = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
@@ -38,13 +38,17 @@ if (!(Test-Path -LiteralPath $webview)) { throw 'Run Python semantic/prepare.py 
 if ([System.IO.Path]::GetFileName($OutputName) -ne $OutputName) { throw 'OutputName must be a filename.' }
 $appIcon = Join-Path $root 'assets\AgitCon.ico'
 if (!(Test-Path -LiteralPath $appIcon)) { throw 'Run tools/build-icon.py first.' }
+$platformDir=Join-Path $root ('artifacts/platforms/'+$Architecture)
+$loader=Join-Path $platformDir 'WebView2Loader.dll'
+if(!(Test-Path -LiteralPath $loader)){throw 'Run tools/prepare-platform.py for this architecture first.'}
 $output = Join-Path $buildDir $OutputName
 $version = Get-Content -LiteralPath (Join-Path $root 'version.json') -Raw | ConvertFrom-Json
 if($version.version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'){throw 'Invalid app version.'}
 $assemblyInfo=Join-Path $buildDir 'AssemblyInfo.cs'
 ('[assembly:System.Reflection.AssemblyVersion("'+$version.version+'.0")][assembly:System.Reflection.AssemblyFileVersion("'+$version.version+'.0")][assembly:System.Reflection.AssemblyProduct("KakaoTalk emoji sender")]') | Set-Content -LiteralPath $assemblyInfo -Encoding utf8
 $updateSources=@((Join-Path $root 'src/DpiPolicyTests.cs'),(Join-Path $root 'src/ThumbnailMemory.cs'),(Join-Path $root 'src/LongPreviewVision.cs'),(Join-Path $root 'src/ArcaBrowserSearch.cs'),(Join-Path $root 'src/ArcaSearchTests.cs'),(Join-Path $root 'src/AppUpdateCore.cs'),(Join-Path $root 'src/AppUpdates.cs'),(Join-Path $root 'src/AppUpdateTests.cs'),$assemblyInfo)
-$compression=@('/reference:System.IO.Compression.dll','/reference:System.IO.Compression.FileSystem.dll')
+$updateSources+=@((Join-Path $root "src/AutoPlaySettings.cs"),(Join-Path $root "autoplay/tools/KakaoAutoPlayForm.cs"))
+$compression=@("/reference:System.Web.Extensions.dll",'/reference:System.IO.Compression.dll','/reference:System.IO.Compression.FileSystem.dll')
 $client = Join-Path $wpf 'UIAutomationClient.dll'
 $types = Join-Path $wpf 'UIAutomationTypes.dll'
 $base = Join-Path $wpf 'WindowsBase.dll'
@@ -55,9 +59,9 @@ $metadata=Get-ChildItem 'C:/Program Files (x86)/Windows Kits/10/UnionMetadata' -
 if(!$metadata -or !$runtime -or !(Test-Path -LiteralPath $winrt)){throw 'Windows SDK metadata / .NET Windows Runtime references required.'}
 $visionArgs=@("/reference:$winrt","/reference:$runtime","/reference:$metadata","/resource:$(Join-Path $root 'assets/kakao-settings-gear.png'),AgitCon.KakaoSettingsGear.png",(Join-Path $root 'src/ConfirmationVision.cs'),(Join-Path $root 'src/ConfirmationNavigator.cs'),(Join-Path $root 'src/ConfirmationVisionTests.cs'),(Join-Path $root 'src/OcrSetup.cs'),(Join-Path $root 'src/DpiGeometry.cs'))
 if($DeveloperTests){$developerSources=@($regressionSource,$qualitySource,$autoAuditSource);$developerDefines=@('/define:AGITCON_DEV')}
-& $csc $compression $developerDefines /nologo "/win32icon:$appIcon" "/win32manifest:$(Join-Path $root 'assets/AgitCon.manifest')" "/resource:$appIcon,AgitCon.AppIcon.ico" /target:winexe /platform:x64 /optimize+ /utf8output "/out:$output" /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Runtime.Serialization.dll "/reference:$client" "/reference:$types" "/reference:$base" $updateSources $source (Join-Path $root 'src/CacheMaintenance.cs') (Join-Path $root 'src/LongCon.cs') (Join-Path $root 'src/UiZoom.cs') (Join-Path $root 'src/LongConNative.cs') (Join-Path $root 'src/LongConTests.cs') $shopSource $testSource $uiSource $shopUiSource $collectionSource $semanticSource $bundleTestSource $arcaSource $arcaTestSource $codecSource $imageClipboardSource $previewPasteSource $floatingSource $librarySource $gemmaSource $draftSource $modelAssetsSource $aliasSource $developerSources $promptSource $rankerSource $indexSource $metadataSource (Join-Path $root 'src/StickerAnalysis.cs') (Join-Path $root 'src/AnalysisEvidence.cs') "/reference:$webview" $visionArgs
+& $csc $compression $developerDefines /nologo "/win32icon:$appIcon" "/win32manifest:$(Join-Path $root 'assets/AgitCon.manifest')" "/resource:$appIcon,AgitCon.AppIcon.ico" /target:winexe "/platform:$Architecture" /optimize+ /utf8output "/out:$output" /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Runtime.Serialization.dll "/reference:$client" "/reference:$types" "/reference:$base" $updateSources $source (Join-Path $root 'src/CacheMaintenance.cs') (Join-Path $root 'src/LongCon.cs') (Join-Path $root 'src/UiZoom.cs') (Join-Path $root 'src/LongConNative.cs') (Join-Path $root 'src/LongConTests.cs') $shopSource $testSource $uiSource $shopUiSource $collectionSource $semanticSource $bundleTestSource $arcaSource $arcaTestSource $codecSource $imageClipboardSource $previewPasteSource $floatingSource $librarySource $gemmaSource $draftSource $modelAssetsSource $aliasSource $developerSources $promptSource $rankerSource $indexSource $metadataSource (Join-Path $root 'src/StickerAnalysis.cs') (Join-Path $root 'src/AnalysisEvidence.cs') "/reference:$webview" $visionArgs
 if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
-& $csc /nologo /target:winexe /platform:x64 /optimize+ /utf8output "/out:$(Join-Path $buildDir 'AgitCon.Updater.exe')" /reference:System.dll /reference:System.Core.dll /reference:System.Windows.Forms.dll /reference:System.Runtime.Serialization.dll $compression (Join-Path $root 'src/AppUpdateCore.cs') (Join-Path $root 'tools/AgitConUpdater.cs') $assemblyInfo
+& $csc /nologo /target:winexe "/platform:$Architecture" /optimize+ /utf8output "/out:$(Join-Path $buildDir 'AgitCon.Updater.exe')" /reference:System.dll /reference:System.Core.dll /reference:System.Windows.Forms.dll /reference:System.Runtime.Serialization.dll $compression (Join-Path $root 'src/AppUpdateCore.cs') (Join-Path $root 'tools/AgitConUpdater.cs') $assemblyInfo
 if($LASTEXITCODE -ne 0){throw 'Updater build failed.'}
 Copy-Item -LiteralPath (Join-Path $root 'version.json') -Destination (Join-Path $buildDir 'version.json') -Force
 # Each build owns its manifest and payload. StagePayload is accepted for old commands.
@@ -83,7 +87,8 @@ New-Item -ItemType Directory -Path $codecDir -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $root 'codecs\convert.py') -Destination (Join-Path $codecDir 'convert.py') -Force
 Copy-Item -LiteralPath $appIcon -Destination (Join-Path $buildDir 'AgitCon.ico') -Force
 foreach ($name in @('Microsoft.Web.WebView2.Core.dll','WebView2Loader.dll')) {
-    Copy-Item -LiteralPath (Join-Path $root ('dist/' + $name)) -Destination (Join-Path $buildDir $name) -Force
+    if($name -eq 'WebView2Loader.dll'){$payloadSource=$loader}else{$payloadSource=Join-Path $root ('dist/'+$name)}
+    Copy-Item -LiteralPath $payloadSource -Destination (Join-Path $buildDir $name) -Force
 }
 Copy-Item -LiteralPath (Join-Path $root 'semantic/animated-webp.py') -Destination (Join-Path $semanticDir 'animated-webp.py') -Force
 $payloadFiles = @('prepare.py','worker.py','download-sizes.json','download-integrity.json','gemma2/web/gemma.html','gemma2/web/gemma.mjs','gemma2/web/request-queue.mjs','prepare-caption.py','caption-assets.json','gemma2/web/caption.html','gemma2/web/caption.mjs','gemma2/web/tensor-memory.mjs','animated-webp.py')

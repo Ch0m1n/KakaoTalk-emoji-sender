@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -21,6 +21,7 @@ namespace AgitCon {
    var asset=new ReleaseAsset{Name=UpdateCore.AssetName,State="uploaded",Url="https://github.com/"+UpdateCore.Repository+"/releases/download/v1.0.0/"+UpdateCore.AssetName,Size=100,Digest="sha256:"+new string('a',64)};
    var release=new ReleaseInfo{Tag="v1.0.0",Assets=new List<ReleaseAsset>{asset}};Check(UpdateCore.Select(release,"0.9.0")==asset,"new release");Check(UpdateCore.Select(release,"1.0.0")==null,"already current");Check(UpdateCore.Select(release,"2.0.0")==null,"no downgrade");
    asset.Digest=null;Reject(()=>UpdateCore.Select(release,"0.9.0"),"missing digest");asset.Digest="sha256:"+new string('a',64);release.Assets.Add(asset);Reject(()=>UpdateCore.Select(release,"0.9.0"),"ambiguous asset");release.Assets.RemoveAt(1);release.Prerelease=true;Reject(()=>UpdateCore.Select(release,"0.9.0"),"prerelease");
+   release.Prerelease=false;var setup=new ReleaseAsset{Name=UpdateCore.InstallerName(release.Tag),State="uploaded",Size=100,Digest=asset.Digest};setup.Url="https://github.com/"+UpdateCore.Repository+"/releases/download/"+release.Tag+"/"+setup.Name;release.Assets.Add(setup);Check(UpdateCore.Select(release,"0.9.0",true)==setup,"installed app selects setup");Check(UpdateCore.Select(release,"0.9.0")==asset,"portable app selects ZIP");setup.Url+="bad";Reject(()=>UpdateCore.Select(release,"0.9.0",true),"installer URL mismatch");release.Assets.Remove(setup);
    string package=Zip(root,"good");Check(UpdateCore.Extract(package,Path.Combine(root,"extract"),"1.0.0").Count==4,"extract");Reject(()=>UpdateCore.Extract(package,Path.Combine(root,"wrong-version"),"1.0.1"),"version mismatch");
    int n=0;foreach(string bad in new[]{"../escape","data/catalog.json","semantic/models/weights","AgitCon.exe","AGITCON.EXE"}){string zip=Zip(root,"bad"+(n++),bad);Reject(()=>UpdateCore.Extract(zip,Path.Combine(root,"bad-stage"+n),"1.0.0"),"malicious archive");}
    for(int fault=0;fault<=4;fault++){

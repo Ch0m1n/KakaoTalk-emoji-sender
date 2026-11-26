@@ -17,6 +17,7 @@ namespace AgitCon {
             var button=Ui.Button("업데이트 확인",()=>{using(var window=new AppUpdateForm(exit))window.ShowDialog(settings);});button.Dock=DockStyle.Top;button.Height=44;page.Padding=new Padding(22);page.Controls.Add(button);page.Controls.Add(text);
         }
         internal static string Current {get{return typeof(MainForm).Assembly.GetName().Version.ToString(3);}}
+        bool Installed {get{return File.Exists(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"unins000.exe"));}}
         readonly Label status=Ui.Label("",10);readonly UiButton check,install;readonly Action exit;
         CancellationTokenSource operation;ReleaseInfo release;ReleaseAsset asset;bool handingOff;
         internal AppUpdateForm(Action exit){
@@ -27,15 +28,17 @@ namespace AgitCon {
             Shown+=async(s,e)=>await Check();FormClosing+=(s,e)=>{if(operation!=null&&!handingOff){operation.Cancel();e.Cancel=true;status.Text="요청을 취소하고 있어요…";}};
         }
         async Task Check(){if(operation!=null)return;operation=new CancellationTokenSource();check.Enabled=install.Enabled=false;status.Text="GitHub에서 새 버전을 확인하고 있어요…";
-            try{release=await UpdateCore.Check(operation.Token);asset=release==null?null:UpdateCore.Select(release,Current);status.Text=release==null?"아직 공개된 릴리스가 없어요.":asset==null?"최신 버전을 사용하고 있어요. ("+Current+")":"새 버전 "+release.Tag+"이 있어요.\n업데이트를 누르면 다운로드·검증 후 앱을 재시작해요.";}
+            try{release=await UpdateCore.Check(operation.Token);asset=release==null?null:UpdateCore.Select(release,Current,Installed);status.Text=release==null?"아직 공개된 릴리스가 없어요.":asset==null?"최신 버전을 사용하고 있어요. ("+Current+")":"새 버전 "+release.Tag+"이 있어요.\n업데이트를 누르면 다운로드·검증 후 앱을 재시작해요.";}
             catch(Exception ex){asset=null;status.Text=operation.IsCancellationRequested?"확인을 취소했어요.":ex.Message;}finally{operation.Dispose();operation=null;check.Enabled=true;install.Enabled=asset!=null;}
         }
         async Task Install(){if(operation!=null||asset==null)return;operation=new CancellationTokenSource();check.Enabled=install.Enabled=false;
             try{
                 string folder=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"AgitCon","updates",release.Tag.TrimStart('v'),Guid.NewGuid().ToString("N"));
                 string package=await UpdateCore.Download(asset,folder,operation.Token,new Progress<string>(text=>{if(!IsDisposed)status.Text=text;}));operation.Token.ThrowIfCancellationRequested();status.Text="배포 파일을 확인하고 있어요…";
-                string stage=Path.Combine(folder,"verified");await Task.Run(()=>UpdateCore.Extract(package,stage,release.Tag),operation.Token);operation.Token.ThrowIfCancellationRequested();
-                var plan=new UpdatePlan{Root=AppDomain.CurrentDomain.BaseDirectory,Package=package,Sha256=asset.Digest.Substring(7).ToLowerInvariant(),Version=release.Tag.TrimStart('v'),Process=Process.GetCurrentProcess().Id,Started=Process.GetCurrentProcess().StartTime.ToUniversalTime().Ticks};
+                string stage=Path.Combine(folder,"verified");
+                if(Installed){Directory.CreateDirectory(stage);File.Copy(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"AgitCon.Updater.exe"),Path.Combine(stage,"AgitCon.Updater.exe"));}
+                else await Task.Run(()=>UpdateCore.Extract(package,stage,release.Tag),operation.Token);operation.Token.ThrowIfCancellationRequested();
+                var plan=new UpdatePlan{Installer=Installed,Root=AppDomain.CurrentDomain.BaseDirectory,Package=package,Sha256=asset.Digest.Substring(7).ToLowerInvariant(),Version=release.Tag.TrimStart('v'),Process=Process.GetCurrentProcess().Id,Started=Process.GetCurrentProcess().StartTime.ToUniversalTime().Ticks};
                 string planPath=Path.Combine(folder,"install.json");UpdateCore.Write(planPath,plan);
                 string updater=Path.Combine(stage,"AgitCon.Updater.exe");var start=new ProcessStartInfo(updater,"--apply \""+planPath+"\""){UseShellExecute=false,CreateNoWindow=true,WorkingDirectory=folder};
                 if(Process.Start(start)==null)throw new IOException("업데이트 도우미를 실행하지 못했어요.");handingOff=true;Close();exit();

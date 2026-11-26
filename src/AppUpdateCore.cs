@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -20,10 +20,11 @@ namespace AgitCon.Updates {
         [DataMember(Name="tag_name")]public string Tag;[DataMember(Name="draft")]public bool Draft;[DataMember(Name="prerelease")]public bool Prerelease;[DataMember(Name="assets")]public List<ReleaseAsset> Assets;
     }
     [DataContract] public sealed class UpdatePlan {
-        [DataMember]public string Root;[DataMember]public string Package;[DataMember]public string Sha256;[DataMember]public string Version;[DataMember]public int Process;[DataMember]public long Started;
+        [DataMember]public string Root;[DataMember]public string Package;[DataMember]public string Sha256;[DataMember]public string Version;[DataMember]public int Process;[DataMember]public long Started;[DataMember]public bool Installer;
     }
     public static class UpdateCore {
-        public const string Repository="Ch0m1n/KakaoTalk-emoji-sender",AssetName="AgitCon-win-x64.zip";
+        public const string Repository="Ch0m1n/KakaoTalk-emoji-sender";
+        public static readonly string AssetName="AgitCon-win-"+(IntPtr.Size==8?"x64":"x86")+".zip";
         public const string Api="https://api.github.com/repos/"+Repository+"/releases/latest";
         public static readonly string[] RedirectHosts={"github.com","api.github.com","release-assets.githubusercontent.com","objects.githubusercontent.com"};
         public static Version ParseVersion(string text){if(text==null||!Regex.IsMatch(text,@"^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$"))throw new InvalidDataException("릴리스 버전 형식이 올바르지 않아요.");return System.Version.Parse(text.TrimStart('v'));}
@@ -31,12 +32,14 @@ namespace AgitCon.Updates {
         public static void Write<T>(string file,T value){using(var stream=File.Create(file))new DataContractJsonSerializer(typeof(T)).WriteObject(stream,value);}
         public static string Hash(string file){using(var input=File.OpenRead(file))using(var sha=SHA256.Create())return BitConverter.ToString(sha.ComputeHash(input)).Replace("-","").ToLowerInvariant();}
         public static bool UrlAllowed(Uri url){return url.Scheme=="https"&&url.IsDefaultPort&&String.IsNullOrEmpty(url.UserInfo)&&RedirectHosts.Contains(url.DnsSafeHost,StringComparer.OrdinalIgnoreCase);}
-        public static ReleaseAsset Select(ReleaseInfo release,string current){
+        public static string InstallerName(string version){return "AgitCon-Setup-"+ParseVersion(version).ToString(3)+"-win-"+(IntPtr.Size==8?"x64":"x86")+".exe";}
+        public static ReleaseAsset Select(ReleaseInfo release,string current,bool installer=false){
             var version=ParseVersion(release.Tag);if(release.Draft||release.Prerelease)throw new InvalidDataException("정식 릴리스만 업데이트할 수 있어요.");
             if(version<=ParseVersion(current))return null;
-            var assets=(release.Assets??new List<ReleaseAsset>()).Where(a=>a.Name==AssetName&&a.State=="uploaded").ToList();
+            string expectedName=installer?InstallerName(release.Tag):AssetName;
+            var assets=(release.Assets??new List<ReleaseAsset>()).Where(a=>a.Name==expectedName&&a.State=="uploaded").ToList();
             if(assets.Count!=1)throw new InvalidDataException("새 버전의 배포 파일이 아직 준비되지 않았어요.");var asset=assets[0];
-            if(asset.Url!="https://github.com/"+Repository+"/releases/download/"+release.Tag+"/"+AssetName||asset.Size<2||asset.Size>512L*1024*1024||!Regex.IsMatch(asset.Digest??"",@"^sha256:[0-9a-fA-F]{64}$"))throw new InvalidDataException("GitHub 배포 파일의 주소·크기·무결성 정보를 확인하지 못했어요.");return asset;
+            if(asset.Url!="https://github.com/"+Repository+"/releases/download/"+release.Tag+"/"+expectedName||asset.Size<2||asset.Size>512L*1024*1024||!Regex.IsMatch(asset.Digest??"",@"^sha256:[0-9a-fA-F]{64}$"))throw new InvalidDataException("GitHub 배포 파일의 주소·크기·무결성 정보를 확인하지 못했어요.");return asset;
         }
         static async Task<HttpWebResponse> Open(Uri url,CancellationToken token){
             ServicePointManager.SecurityProtocol|=SecurityProtocolType.Tls12;
@@ -56,15 +59,15 @@ namespace AgitCon.Updates {
             }}catch(WebException ex){var response=ex.Response as HttpWebResponse;if(response!=null&&response.StatusCode==HttpStatusCode.NotFound)return null;if(response!=null&&((int)response.StatusCode==403||(int)response.StatusCode==429))throw new InvalidOperationException("GitHub 조회 한도에 도달했어요. 잠시 후 다시 확인해주세요.");token.ThrowIfCancellationRequested();throw new InvalidOperationException("GitHub에 연결하지 못했어요. 인터넷 연결을 확인해주세요.",ex);}
         }
         public static async Task<string> Download(ReleaseAsset asset,string folder,CancellationToken token,IProgress<string> progress){
-            Directory.CreateDirectory(folder);string file=Path.Combine(folder,AssetName),part=file+".part";long total=0;var clock=System.Diagnostics.Stopwatch.StartNew();
+            Directory.CreateDirectory(folder);if(Path.GetFileName(asset.Name)!=asset.Name)throw new InvalidDataException("Invalid asset name");string file=Path.Combine(folder,asset.Name),part=file+".part";long total=0;var clock=System.Diagnostics.Stopwatch.StartNew();
             try{using(var response=await Open(new Uri(asset.Url),token))using(token.Register(()=>response.Close()))using(var input=response.GetResponseStream())using(var output=new FileStream(part,FileMode.CreateNew,FileAccess.Write,FileShare.None)){
                 var buffer=new byte[262144];int read;while((read=await input.ReadAsync(buffer,0,buffer.Length,token))>0){total+=read;if(total>asset.Size||clock.Elapsed.TotalMinutes>10)throw new InvalidDataException("다운로드 크기 또는 시간 제한을 초과했어요.");await output.WriteAsync(buffer,0,read,token);if(progress!=null)progress.Report("다운로드 "+(total*100/asset.Size)+"% · "+(total/1048576.0).ToString("0.0")+" / "+(asset.Size/1048576.0).ToString("0.0")+" MB");}
             }token.ThrowIfCancellationRequested();if(total!=asset.Size||Hash(part)!=asset.Digest.Substring(7).ToLowerInvariant())throw new InvalidDataException("다운로드 무결성 검증에 실패했어요. 기존 앱은 유지해요.");File.Move(part,file);return file;}finally{if(File.Exists(part))File.Delete(part);}
         }
         public static bool AllowedFile(string relative){
             var parts=relative.Split('/');if(parts.Length==1)return new[]{"AgitCon.exe","AgitCon.Updater.exe","AgitCon.ico","Microsoft.Web.WebView2.Core.dll","WebView2Loader.dll","version.json","package-manifest.json","README.txt","수정 안내.txt"}.Contains(relative,StringComparer.OrdinalIgnoreCase);
-            if(parts.Any(p=>new[]{"data","profile","profiles","models","model",".venv","user-data",".git"}.Contains(p,StringComparer.OrdinalIgnoreCase)))return false;
-            return new[]{"runtime","codecs","semantic","licenses"}.Contains(parts[0],StringComparer.OrdinalIgnoreCase);
+            if(parts.Any(p=>new[]{"data","profile","profiles","models","model",".venv","user-data",".git","artifacts"}.Contains(p,StringComparer.OrdinalIgnoreCase)))return false;
+            return new[]{"runtime","codecs","semantic","licenses","autoplay"}.Contains(parts[0],StringComparer.OrdinalIgnoreCase);
         }
         public static string SafeRelative(string name){
             if(String.IsNullOrEmpty(name)||name.Length>240||name.Contains('\\')||name.Contains(':')||name.StartsWith("/")||name.IndexOf('\0')>=0)throw new InvalidDataException("안전하지 않은 ZIP 경로예요.");

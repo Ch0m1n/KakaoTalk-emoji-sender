@@ -1,0 +1,15 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const context = vm.createContext({});
+vm.runInContext(fs.readFileSync(path.join(__dirname, 'kakao-photo-hover.js'), 'utf8'), context);
+const matches = context.photoMatchesSenderGroup;
+const group = {x: 68, nextY: 190, tolerance: 8};
+assert.equal(matches(group, 68, 190), true, 'photo directly below sender');
+assert.equal(matches(group, 68, 431), true, 'photo after seven text messages');
+assert.equal(matches(group, 68, 900), true, 'more text between consecutive photos');
+assert.equal(matches(group, 143, 657), false, 'right-aligned photo belongs to someone else');
+assert.equal(matches(null, 68, 431), false, 'next avatar clears the previous sender');
+assert.equal(matches(group, 68, 170), false, 'photo above the sender cannot belong to the group');
+console.log('Sender photo layout regression: 6 cases passed');

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.IO;
 using System.Threading;
@@ -19,7 +19,12 @@ static class AgitConUpdater {
                 if(!process.WaitForExit(30000))throw new IOException("아지트콘이 아직 종료 중이에요. 앱을 완전히 종료한 뒤 다시 업데이트해주세요.");
             }}catch(ArgumentException){}
             parentExited=true;string stage=Path.Combine(Path.GetDirectoryName(planPath),"install-"+Guid.NewGuid().ToString("N"));
-            UpdateCore.Apply(plan,stage,exe=>{
+            if(plan.Installer){
+                if(UpdateCore.Hash(plan.Package)!=plan.Sha256||Path.GetFileName(plan.Package)!=UpdateCore.InstallerName(plan.Version))throw new InvalidDataException("설치 파일의 무결성을 확인하지 못했어요.");
+                if(UpdateCore.ParseVersion(FileVersionInfo.GetVersionInfo(plan.Package).ProductVersion.Trim())!=UpdateCore.ParseVersion(plan.Version))throw new InvalidDataException("설치 파일 버전이 달라요.");
+                var arguments="/SP- /SILENT /SUPPRESSMSGBOXES /NORESTART /UPDATEFROMAGIT=1 /DIR=\""+plan.Root.TrimEnd(Path.DirectorySeparatorChar)+"\"";
+                using(var setup=Process.Start(new ProcessStartInfo(plan.Package,arguments){UseShellExecute=false,WorkingDirectory=Path.GetDirectoryName(plan.Package)})){if(setup==null||!setup.WaitForExit(600000)||setup.ExitCode!=0)throw new IOException("설치를 마치지 못했어요. 설치 파일을 직접 실행해주세요.");}
+            }else UpdateCore.Apply(plan,stage,exe=>{
                 var process=Process.Start(new ProcessStartInfo(exe){UseShellExecute=false,WorkingDirectory=plan.Root});
                 if(process==null)throw new IOException("새 버전을 실행하지 못했어요.");
                 if(process.WaitForExit(900))throw new IOException("새 버전이 시작 직후 종료됐어요.");
