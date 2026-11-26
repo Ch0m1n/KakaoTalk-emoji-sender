@@ -58,9 +58,46 @@ def convert(source, output_base):
     raise ValueError("지원하지 않는 아카콘 형식이에요")
 
 
+def resize_for_send(source, output_base):
+    from PIL import Image
+    source, output_base = Path(source), Path(output_base)
+    if source.stat().st_size > 30 * 1024 * 1024:
+        raise ValueError("30MB 이하 이미지만 축소해요")
+    with Image.open(source) as image:
+        count = getattr(image, "n_frames", 1)
+        if image.width > 2048 or image.height > 2048 or count > 900 or image.width * image.height * count > 40_000_000:
+            raise ValueError("이미지 해상도 또는 프레임 수가 너무 커요")
+        loop = image.info.get("loop")
+        frames, durations = [], []
+        for index in range(count):
+            image.seek(index)
+            frame = image.convert("RGBA")
+            frame.thumbnail((100, 100), Image.Resampling.LANCZOS)
+            canvas = Image.new("RGBA", (100, 100))
+            canvas.alpha_composite(frame, ((100 - frame.width) // 2, (100 - frame.height) // 2))
+            if count > 1:
+                palette = canvas.convert("RGB").quantize(colors=255)
+                transparent = canvas.getchannel("A").point(lambda alpha: 255 if alpha < 128 else 0)
+                palette.paste(255, mask=transparent)
+                palette.info["transparency"] = 255
+                frames.append(palette)
+            else:
+                frames.append(canvas)
+            durations.append(max(0, int(image.info.get("duration", 100))))
+        output = output_base.with_suffix(".gif" if count > 1 else ".png")
+        if count > 1:
+            options = dict(save_all=True, append_images=frames[1:], duration=durations, disposal=2, transparency=255, optimize=False)
+            if loop is not None:
+                options["loop"] = loop
+            frames[0].save(output, format="GIF", **options)
+        else:
+            frames[0].save(output, format="PNG", dpi=(96, 96))
+        return output
+
+
 if __name__ == "__main__":
     try:
-        result = convert(sys.argv[1], sys.argv[2])
+        result = (resize_for_send if "--100" in sys.argv[3:] else convert)(sys.argv[1], sys.argv[2])
         print(json.dumps({"path": str(result)}), flush=True)
     except Exception as error:
         print(json.dumps({"error": str(error)}, ensure_ascii=False), flush=True)

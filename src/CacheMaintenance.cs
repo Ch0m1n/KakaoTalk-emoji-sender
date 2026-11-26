@@ -62,7 +62,7 @@ namespace AgitCon {
             var panel=new FlowLayoutPanel{Dock=DockStyle.Fill,Padding=new Padding(22),FlowDirection=FlowDirection.TopDown,WrapContents=false,AutoScroll=true};page.Controls.Add(panel);
             var title=Ui.Label("저장된 이미지 정리",17,true);title.Size=new Size(470,42);panel.Controls.Add(title);
             var description=Ui.Label("사용 중인 파일과 충돌하지 않도록 다음 앱 실행 때 삭제해요.\n팩 목록·별칭·모델·외부 로컬 폴더는 유지해요.\n첨부 중인 파일은 먼저 전송하거나 취소해주세요.",9);description.Size=new Size(470,74);panel.Controls.Add(description);
-            var thumbs=new CheckBox{Text="저장된 썸네일",Checked=true,AutoSize=true};var temp=new CheckBox{Text="9분할·합성 임시 이미지",Checked=true,AutoSize=true};var originals=new CheckBox{Text="다운로드한 콘 이미지도 삭제",AutoSize=true};panel.Controls.Add(thumbs);panel.Controls.Add(temp);panel.Controls.Add(originals);
+            var thumbs=new CheckBox{Text="저장된 썸네일",Checked=true,AutoSize=true};var temp=new CheckBox{Text="전송용 축소·9분할·합성 임시 이미지",Checked=true,AutoSize=true};var originals=new CheckBox{Text="다운로드한 콘 이미지도 삭제",AutoSize=true};panel.Controls.Add(thumbs);panel.Controls.Add(temp);panel.Controls.Add(originals);
             var note=Ui.Label("다운로드 이미지는 다시 볼 때 받아요. 다운로드 주소가 없는\n이미지는 보존해요. 원본 삭제 예약 시 미리 불러오기와\n팩 자동 분석을 꺼서 바로 다시 받지 않게 해요.",9);note.Size=new Size(470,76);note.ForeColor=Ui.Muted;panel.Controls.Add(note);
             var status=Ui.Label("삭제할 항목을 선택해주세요.",9);status.Size=new Size(470,62);
             Func<int> flags=()=> (thumbs.Checked?Thumbnails:0)|(temp.Checked?Temporary:0)|(originals.Checked?Downloaded:0);

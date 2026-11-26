@@ -2,6 +2,8 @@
 import argparse
 import json
 import subprocess
+import shutil
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +24,24 @@ def run(command):
 
 
 run([python, '-X', 'utf8', '-c', f"import struct,frida;from PIL import Image;assert struct.calcsize('P')=={8 if arch=='x64' else 4};print('Packaged {arch}: Python/Frida/Pillow imported')"])
+run([python, '-X', 'utf8', ROOT/'codecs/test_resize.py', stage/'codecs/convert.py'])
+with tempfile.TemporaryDirectory(prefix='size-', dir=ROOT/'artifacts/tests') as directory:
+    fixture = Path(directory)
+    for name in ['AgitCon.exe', 'AgitCon.ico', 'Microsoft.Web.WebView2.Core.dll', 'WebView2Loader.dll', 'version.json']:
+        shutil.copy2(stage/name, fixture/name)
+    (fixture/'codecs').mkdir()
+    shutil.copy2(stage/'codecs/convert.py', fixture/'codecs/convert.py')
+    (fixture/'codecs/python-path.txt').write_text(str(python), encoding='utf-8')
+    try:
+        run([fixture/'AgitCon.exe', '--send-size-test'])
+    except subprocess.CalledProcessError:
+        print((fixture/'send-size-test.txt').read_text('utf-8') if (fixture/'send-size-test.txt').exists() else 'No size-test report')
+        raise
+    result = (fixture/'send-size-test.txt').read_text('utf-8')
+    assert result.startswith('PASS'), result
+    (ROOT/f'artifacts/tests/send-size-{arch}.txt').write_text(result, encoding='utf-8')
+print('PASS: packaged 100x100 preparation, animation, settings, cache and batch integration')
+
 tools = ROOT/'autoplay/tools'
 def test(name, *arguments):
     script = tools/name

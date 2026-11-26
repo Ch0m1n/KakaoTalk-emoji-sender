@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -203,6 +203,14 @@ namespace AgitCon {
             var buttons=new FlowLayoutPanel{Dock=DockStyle.Fill,Margin=Padding.Empty};var prepare=Ui.Button("지금 미리 불러오기",start,true);prepare.Width=180;var cancel=Ui.Button("중지",stop);cancel.Width=80;buttons.Controls.AddRange(new Control[]{prepare,cancel});panel.Controls.Add(buttons);
             var bar=new InstallBar{Dock=DockStyle.Top,Height=9,Maximum=100};panel.Controls.Add(bar);var summary=Ui.Label("",10);summary.Dock=DockStyle.Fill;panel.Controls.Add(summary);var help=Ui.Label("이미 받은 원본과 썸네일은 다시 내려받지 않아요.\n등록된 팩의 아직 안 받은 이미지는 인터넷으로 받아요.\n메모리 보관 한도는 128 MB이며 오래 안 본 것부터 비워요.\n움짤은 썸네일을 먼저 띄우고 화면에서 최대 2개를 재생해요.",9);help.Dock=DockStyle.Fill;help.ForeColor=Ui.Muted;panel.Controls.Add(help);
             var poll=new System.Windows.Forms.Timer{Interval=250};Action refresh=()=>{if(IsDisposed)return;summary.Text=state();bar.Value=Math.Max(0,Math.Min(100,percent()));prepare.Enabled=!busy();cancel.Enabled=busy();};poll.Tick+=(s,e)=>refresh();FormClosed+=(s,e)=>poll.Dispose();refresh();poll.Start();
+        }
+        public void AddSendSizeSettings(bool enabled,Action<bool> changed){
+            var tabs=Controls.OfType<TabControl>().Single();var page=new TabPage("전송"){BackColor=Ui.Paper};tabs.TabPages.Add(page);
+            var panel=new FlowLayoutPanel{Dock=DockStyle.Fill,Padding=new Padding(22),FlowDirection=FlowDirection.TopDown,WrapContents=false,AutoScroll=true};page.Controls.Add(panel);
+            var title=Ui.Label("첨부 이미지 크기",17,true);title.Size=new Size(450,46);panel.Controls.Add(title);
+            var option=new CheckBox{Text="100×100으로 축소해서 보내기",Checked=enabled,AutoSize=true};panel.Controls.Add(option);
+            var help=Ui.Label("원본을 보존하고 첨부용 사본만 만들어요.\n비율을 유지하고 남는 공간은 여백으로 채워요.\n움짤은 움직임을 유지해요. 더블콘·롱콘·9분할은 각 이미지에 적용해요.\n원본 파일 복사에는 적용하지 않아요.",9);help.Size=new Size(450,110);panel.Controls.Add(help);
+            option.CheckedChanged+=(s,e)=>changed(option.Checked);
         }
         public void AddOcrSettings(bool direct=false,Action<bool> directChanged=null){
             var tabs=Controls.OfType<TabControl>().Single();var page=new TabPage("움짤"){BackColor=Ui.Paper};tabs.TabPages.Add(page);

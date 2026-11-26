@@ -21,10 +21,10 @@ namespace AgitCon {
     }
     internal sealed class LongPrepared:IDisposable {
         internal readonly List<ImageClipboard> Parts=new List<ImageClipboard>();
-        internal static LongPrepared Create(IList<Entry> entries,CancellationToken token,Action<int> progress=null){
+        internal static LongPrepared Create(IList<Entry> entries,CancellationToken token,Action<int> progress=null,bool resize100=false){
             if(entries.Count<2||entries.Count>20)throw new InvalidOperationException("정지 조각을 2~20개 선택해주세요.");
             var ready=new LongPrepared();long bytes=0;
-            try{foreach(var entry in entries){token.ThrowIfCancellationRequested();string path=DcShop.EnsureImage(entry,token);
+            try{foreach(var entry in entries){token.ThrowIfCancellationRequested();string path=AssetCodec.ResizeForSend(DcShop.EnsureImage(entry,token),resize100,token);
                 using(var image=Image.FromFile(path)){
                     if(ImageBundle.Animated(image))throw new InvalidOperationException("첫 버전의 롱콘은 정지 조각만 지원해요.");
                     bytes+=(long)image.Width*image.Height*16;
