@@ -80,7 +80,8 @@ jobs:
         run: |
           $version=(Get-Content version.json -Raw|ConvertFrom-Json).version
           if($env:GITHUB_REF_NAME -cne "v$version"){throw 'Tag and package version mismatch'}
-          $assets=Get-ChildItem release-assets -File
-          if($assets.Count -ne 8){throw 'Both installers, updater ZIPs and hashes must be present'}
+          $assets=@(Get-ChildItem release-assets -Recurse -File)
+          $expected=@('x86','x64' | ForEach-Object {"AgitCon-win-$_.zip";"AgitCon-win-$_.zip.sha256";"AgitCon-Setup-$version-win-$_.exe";"AgitCon-Setup-$version-win-$_.exe.sha256"})
+          if($assets.Count -ne 8 -or @(Compare-Object ($expected|Sort-Object) ($assets.Name|Sort-Object)).Count){throw 'Both installers, portable ZIPs and hashes must be present exactly once'}
           gh release create $env:GITHUB_REF_NAME @($assets.FullName) --verify-tag --title "AgitCon $version" --notes-file docs/RELEASE.md
           if($LASTEXITCODE){throw 'Release publication failed'}
