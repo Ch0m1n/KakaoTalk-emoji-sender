@@ -115,6 +115,7 @@ namespace AgitCon {
             return new DraftResult{Supported=true,Text=text.TrimEnd('\r','\n')};
         }
         static DraftResult Read(PreviewChatTarget target){try{
+            if(target!=null&&target.AccessibleEditor!=null)return new DraftResult{Reason="신형 카톡의 작성 문장 읽기는 아직 검증되지 않았어요 · 직접 검색해주세요."};
             if(!PreviewPaste.IsFocused(target))return new DraftResult{Reason="카톡 메시지 입력창에 포커스를 두세요."};
             var element=AutomationElement.FocusedElement;if(element==null)return new DraftResult{Reason="접근성 입력창을 제공하지 않아요 · 직접 검색해주세요."};
             var current=element.Current;

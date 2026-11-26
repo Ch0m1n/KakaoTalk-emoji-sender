@@ -11,14 +11,24 @@ using System.Collections.Generic;
 using System.IO;
 
 namespace AgitCon {
-    public sealed class PreviewChatTarget {public IntPtr Window,Editor;public uint ProcessId,ThreadId;public string Title,EditorClass;public long Version;}
+    public sealed class PreviewChatTarget {public IntPtr Window,Editor;public uint ProcessId,ThreadId;public string Title,EditorClass;public long Version;internal AutomationElement AccessibleEditor;internal string AccessibleId;}
     public sealed class PreviewPasteResult {public bool Requested;public string Reason,Stage,Block;}
     internal sealed class PasteChecks {
         internal Func<bool> SourceCurrent,TargetCurrent,ClipboardCurrent,ModifiersReleased,TargetFocused,Activate,Send;
         internal Func<string> SourceProblem=()=>"source-not-current",TargetProblem=()=>"target-not-current";internal Func<string> SelectionProblem;internal Func<CancellationToken,Task> Pause;internal Action End=()=>{};
     }
     internal static class PasteFlow {
-        internal static async Task<PreviewPasteResult> Run(SemaphoreSlim gate,PasteChecks checks,CancellationToken token){await gate.WaitAsync(token);try{return await Execute(checks,token);}finally{checks.End();gate.Release();}}
+        internal static async Task<PreviewPasteResult> Run(SemaphoreSlim gate,PasteChecks checks,CancellationToken token){await gate.WaitAsync(token);try{var result=await Execute(checks,token);if(!result.Requested&&result.Reason=="대상·포커스 또는 클립보드가 바뀌어 콘 복사만 했어요.")result.Reason=BlockedReason(result.Block);return result;}finally{checks.End();gate.Release();}}
+        static string BlockedReason(string block){
+            if(block=="target/not-captured")return "카톡 입력창을 확인하지 못해 콘만 복사했어요. 채팅방을 한 번 클릭한 뒤 다시 골라주세요.";
+            if(block!=null&&block.StartsWith("target/"))return "첨부 대상이 바뀌었거나 입력창을 확인하지 못해 콘만 복사했어요. ["+block+"]";
+            if(block!=null&&block.StartsWith("clipboard/"))return "다른 작업이 클립보드를 바꿔 첨부를 멈췄어요. 콘을 다시 골라주세요.";
+            if(block!=null&&block.StartsWith("focus/"))return "카톡 입력창으로 포커스를 옮기지 못해 콘만 복사했어요.";
+            if(block=="source/observation-hooks-missing")return "카톡 창 감시를 시작하지 못해 콘만 복사했어요. 앱을 다시 실행해주세요.";
+            if(block!=null&&block.StartsWith("source/"))return "콘을 고른 창의 포커스가 바뀌어 첨부를 멈췄어요. 콘을 다시 골라주세요.";
+            if(block!=null&&block.StartsWith("modifiers/"))return "Alt·Ctrl·Shift 키가 눌린 상태여서 첨부를 멈췄어요. 키를 놓고 다시 골라주세요.";
+            return "첨부 조건을 확인하지 못해 콘만 복사했어요. ["+block+"]";
+        }
         internal static async Task<PreviewPasteResult> Execute(PasteChecks c,CancellationToken token){
             token.ThrowIfCancellationRequested();var result=new PreviewPasteResult{Reason="대상·포커스 또는 클립보드가 바뀌어 콘 복사만 했어요."};
             Func<string,bool> sourceReady=stage=>{result.Stage=stage;if(!c.SourceCurrent()){result.Block="source/"+c.SourceProblem();return false;}if(!c.TargetCurrent()){result.Block="target/"+c.TargetProblem();return false;}if(!c.ClipboardCurrent()){result.Block="clipboard/changed";return false;}if(!c.ModifiersReleased()){result.Block="modifiers/held";return false;}return true;};
@@ -32,7 +42,7 @@ namespace AgitCon {
             token.ThrowIfCancellationRequested();if(!sourceReady("before-selection-probe"))return result;
             string problem=c.SelectionProblem();token.ThrowIfCancellationRequested();if(problem!=null){result.Stage="source-selection-probe";result.Block="selection/"+problem;result.Reason=problem+" · 콘 복사만 했어요.";return result;}
             if(!sourceReady("before-activation"))return result;
-            if(!c.Activate()){result.Stage="activation";result.Block="activation/failed";result.Reason="카톡을 활성화하지 못해 콘 복사만 했어요.";return result;}
+            if(!c.Activate()){result.Stage="activation";result.Block="activation/failed";result.Reason="카톡 입력창을 활성화하지 못해 콘 복사만 했어요.";return result;}
             for(int i=0;i<10;i++){await c.Pause(token);if(!c.TargetCurrent()||!c.ClipboardCurrent())break;if(c.TargetFocused())break;}
             token.ThrowIfCancellationRequested();if(!targetReady("after-activation"))return result;
             problem=c.SelectionProblem();token.ThrowIfCancellationRequested();if(problem!=null){result.Stage="target-selection-probe";result.Block="selection/"+problem;result.Reason=problem+" · 콘 복사만 했어요.";return result;}
@@ -149,22 +159,50 @@ namespace AgitCon {
         static Input Key(ushort key,bool up){return new Input{Type=1,Data=new InputData{Keyboard=new Keyboard{Key=key,Flags=up?2u:0u,Extra=new UIntPtr(0x4d495543)}}};}
         static Input[] PasteKeys(){return new[]{Key(0x11,false),Key(0x56,false),Key(0x56,true),Key(0x11,true)};}
         bool Own(IntPtr h){uint pid;Native.GetWindowThreadProcessId(h,out pid);return pid==ownProcess;}
-        void OnEvent(IntPtr hook,uint type,IntPtr window,int objectId,int childId,uint thread,uint time){if(verifyingSettings&&type==3){if(photoTarget==null||!ConfirmationNavigator.ExpectedForeground(window,photoTarget.ProcessId,verificationMain,verificationSource,photoTarget.Window))photoFocusLost=true;return;}if(type==3)ObserveConfirmationSettings(window);if(type==3&&FileAttachmentInProgress&&photoTarget!=null&&!Own(window)&&window!=photoTarget.Window&&!OwnedByRoom(window,photoTarget)&&!NewFileDialogTransition(window,photoTarget))photoFocusLost=true;if(type==3){if(!Own(window)&&(current==null||window!=current.Window))Invalidate();}else if(current!=null&&window==current.Window&&objectId==0&&Native.Title(window)!=current.Title)Invalidate();}
+        void OnEvent(IntPtr hook,uint type,IntPtr window,int objectId,int childId,uint thread,uint time){if(verifyingSettings&&type==3){if(photoTarget==null||!ConfirmationNavigator.ExpectedForeground(window,photoTarget.ProcessId,verificationMain,verificationSource,photoTarget.Window))photoFocusLost=true;return;}if(type==3)ObserveConfirmationSettings(window);if(type==3&&FileAttachmentInProgress&&photoTarget!=null&&!Own(window)&&window!=photoTarget.Window&&!OwnedByRoom(window,photoTarget)&&!NewFileDialogTransition(window,photoTarget))photoFocusLost=true;if(type==3){if(!Own(window)&&(current==null||window!=current.Window))Invalidate();if(!transition&&window==Native.GetForegroundWindow()&&Native.IsKakao(window))Observe();}else if(current!=null&&window==current.Window&&objectId==0&&Native.Title(window)!=current.Title)Invalidate();}
         void Invalidate(){version++;current=null;}
         static string Class(IntPtr h){var b=new StringBuilder(128);GetClassName(h,b,b.Capacity);return b.ToString();}
         static IntPtr Focus(uint thread){var info=new GuiInfo{Size=(uint)Marshal.SizeOf(typeof(GuiInfo))};return GetGUIThreadInfo(thread,ref info)?info.Focus:IntPtr.Zero;}
-        static bool Composer(IntPtr root,IntPtr editor){if(editor==IntPtr.Zero||!Native.IsWindow(editor)||!IsWindowEnabled(editor)||Native.GetAncestor(editor,2)!=root)return false;if(!Class(editor).StartsWith("RichEdit",StringComparison.OrdinalIgnoreCase)||(GetWindowLong(editor,-16)&0x800)!=0)return false;Native.Rect chat,input;if(!Native.GetWindowRect(root,out chat)||!Native.GetWindowRect(editor,out input))return false;return input.Top>=chat.Top+(chat.Bottom-chat.Top)*0.5&&input.Right-input.Left>=(chat.Right-chat.Left)*0.5&&input.Bottom-input.Top>=24&&input.Bottom<=chat.Bottom;}
+        static bool Composer(IntPtr root,IntPtr editor){if(editor==IntPtr.Zero||!Native.IsWindow(editor)||!IsWindowVisible(editor)||!IsWindowEnabled(editor)||Native.GetAncestor(editor,2)!=root||!Class(editor).StartsWith("RichEdit",StringComparison.OrdinalIgnoreCase)||(GetWindowLong(editor,-16)&0x800)!=0)return false;var candidate=ChatFloating.Find(root,false);return candidate!=null&&candidate.Editor==editor;}
         // Read selection coordinates only; never obtain draft text or chat history.
         static bool NoSelection(IntPtr editor,out string reason){reason="";IntPtr start=Marshal.AllocHGlobal(4),end=Marshal.AllocHGlobal(4);try{Marshal.WriteInt32(start,-1);Marshal.WriteInt32(end,-1);UIntPtr result;if(SendMessageTimeout(editor,0x00B0,start,end,0x22,200,out result)==IntPtr.Zero){reason="선택 상태를 확인하지 못했어요";return false;}int a=Marshal.ReadInt32(start),b=Marshal.ReadInt32(end);if(a<0||b<0){reason="선택 상태를 제공하지 않는 입력창이에요";return false;}if(a!=b){reason="작성 문장에 선택 영역이 있어요";return false;}return true;}finally{Marshal.FreeHGlobal(start);Marshal.FreeHGlobal(end);}}
-        public void Observe(){if(transition)return;IntPtr root=Native.GetForegroundWindow();if(Own(root))return;if(!Native.IsKakao(root)||Native.IsIconic(root)){if(current!=null)Invalidate();return;}uint pid;uint thread=Native.GetWindowThreadProcessId(root,out pid);IntPtr editor=Focus(thread);if(!Composer(root,editor)){if(current!=null)Invalidate();return;}string title=Native.Title(root);if(String.IsNullOrWhiteSpace(title)||title=="카카오톡"){Invalidate();return;}if(current==null||current.Window!=root||current.Editor!=editor||current.Title!=title){version++;current=new PreviewChatTarget{Window=root,Editor=editor,Title=title,EditorClass=Class(editor),ProcessId=pid,ThreadId=thread,Version=version};}}
-        public PreviewChatTarget Snapshot(){return current==null?null:new PreviewChatTarget{Window=current.Window,Editor=current.Editor,Title=current.Title,EditorClass=current.EditorClass,ProcessId=current.ProcessId,ThreadId=current.ThreadId,Version=current.Version};}
-        public static bool IsFocused(PreviewChatTarget target){if(target==null||Native.GetForegroundWindow()!=target.Window||!Native.IsKakao(target.Window)||Native.IsIconic(target.Window)||Native.Title(target.Window)!=target.Title)return false;uint pid;uint thread=Native.GetWindowThreadProcessId(target.Window,out pid);return pid==target.ProcessId&&thread==target.ThreadId&&Focus(thread)==target.Editor&&Composer(target.Window,target.Editor);}
-        public string Status {get{return (gifDirectSend?"움짤 바로 전송 켜짐 · ":"")+(current==null?"카톡 메시지 입력창을 한 번 눌러주세요":"첨부 대상: "+current.Title);}}
-        bool Valid(PreviewChatTarget target){if(target==null||current==null||target.Version!=version||target.Window!=current.Window||target.Editor!=current.Editor||!Native.IsWindow(target.Window)||!IsWindowEnabled(target.Window)||Native.IsIconic(target.Window)||Native.Title(target.Window)!=target.Title||!Native.IsKakao(target.Window))return false;uint pid;uint thread=Native.GetWindowThreadProcessId(target.Window,out pid);return pid==target.ProcessId&&thread==target.ThreadId&&Class(target.Editor)==target.EditorClass&&Composer(target.Window,target.Editor);}
+        string captureHint="카톡 메시지 입력창을 한 번 눌러주세요";DateTime nextQtObserve;
+        public void Observe(){
+            if(transition)return;IntPtr root=Native.GetForegroundWindow();if(Own(root))return;
+            if(!Native.IsKakao(root)||Native.IsIconic(root)){if(current!=null)Invalidate();captureHint="카톡 채팅방을 한 번 클릭해주세요";return;}
+            uint pid;uint thread=Native.GetWindowThreadProcessId(root,out pid);string title=Native.Title(root);
+            if(String.IsNullOrWhiteSpace(title)||title=="카카오톡"||title=="KakaoTalk"){Invalidate();return;}
+            IntPtr editor=Focus(thread);AutomationElement accessible=null;string accessibleId=null;
+            if(Class(root).StartsWith("Qt",StringComparison.OrdinalIgnoreCase)){
+                if(current!=null&&current.Window==root&&current.Title==title&&DateTime.UtcNow<nextQtObserve)return;
+                nextQtObserve=DateTime.UtcNow.AddMilliseconds(750);
+                accessible=QtComposer.Find(root,pid);accessibleId=QtComposer.Identity(accessible);editor=root;
+                if(accessible==null||accessibleId==null){if(current!=null)Invalidate();captureHint="신형 카톡 입력창의 접근성·선택 상태를 확인하지 못했어요 · 직접 붙여넣어주세요";return;}
+            }else if(!Composer(root,editor)){
+                var found=ChatFloating.Find(root);editor=found==null?IntPtr.Zero:found.Editor;
+                if(!Composer(root,editor)){if(current!=null)Invalidate();captureHint="입력창을 확인하지 못했어요 · 채팅방 입력란을 클릭해주세요";return;}
+            }
+            if(Native.GetForegroundWindow()!=root){Invalidate();return;}
+            if(current==null||current.Window!=root||current.Editor!=editor||current.Title!=title||current.AccessibleId!=accessibleId){version++;current=new PreviewChatTarget{Window=root,Editor=editor,Title=title,EditorClass=Class(editor),ProcessId=pid,ThreadId=thread,Version=version,AccessibleEditor=accessible,AccessibleId=accessibleId};}
+        }
+        public PreviewChatTarget Snapshot(){return current==null?null:new PreviewChatTarget{Window=current.Window,Editor=current.Editor,Title=current.Title,EditorClass=current.EditorClass,ProcessId=current.ProcessId,ThreadId=current.ThreadId,Version=current.Version,AccessibleEditor=current.AccessibleEditor,AccessibleId=current.AccessibleId};}
+        public static bool IsFocused(PreviewChatTarget target){if(target==null||Native.GetForegroundWindow()!=target.Window||!Native.IsKakao(target.Window)||Native.IsIconic(target.Window)||Native.Title(target.Window)!=target.Title)return false;uint pid;uint thread=Native.GetWindowThreadProcessId(target.Window,out pid);return pid==target.ProcessId&&thread==target.ThreadId&&(target.AccessibleEditor!=null?QtComposer.Focused(target):Focus(thread)==target.Editor&&Composer(target.Window,target.Editor));}
+        public string Status {get{return (gifDirectSend?"움짤 바로 전송 켜짐 · ":"")+(current==null?captureHint:"첨부 대상: "+current.Title);}}
+        bool Valid(PreviewChatTarget target){if(target==null||current==null||target.Version!=version||target.Window!=current.Window||target.Editor!=current.Editor||!Native.IsWindow(target.Window)||!IsWindowEnabled(target.Window)||Native.IsIconic(target.Window)||Native.Title(target.Window)!=target.Title||!Native.IsKakao(target.Window))return false;uint pid;uint thread=Native.GetWindowThreadProcessId(target.Window,out pid);return pid==target.ProcessId&&thread==target.ThreadId&&Class(target.Editor)==target.EditorClass&&(target.AccessibleEditor!=null?current.AccessibleId==target.AccessibleId&&QtComposer.Current(target):Composer(target.Window,target.Editor));}
         string TargetProblem(PreviewChatTarget target){
             if(disposed)return "disposed";if(target==null)return "not-captured";if(current==null)return "snapshot-invalidated";if(target.Version!=version)return "version-changed";if(target.Window!=current.Window||target.Editor!=current.Editor)return "composer-changed";
             if(!Native.IsWindow(target.Window))return "window-closed";if(!IsWindowEnabled(target.Window))return "window-disabled";if(Native.IsIconic(target.Window))return "window-minimized";if(Native.Title(target.Window)!=target.Title)return "title-changed";if(!Native.IsKakao(target.Window))return "not-kakao";
-            uint pid;uint thread=Native.GetWindowThreadProcessId(target.Window,out pid);if(pid!=target.ProcessId||thread!=target.ThreadId)return "process-or-thread-changed";if(Class(target.Editor)!=target.EditorClass)return "editor-class-changed";if(!Composer(target.Window,target.Editor))return "composer-check-failed";return "changed-during-check";
+            uint pid;uint thread=Native.GetWindowThreadProcessId(target.Window,out pid);if(pid!=target.ProcessId||thread!=target.ThreadId)return "process-or-thread-changed";if(Class(target.Editor)!=target.EditorClass)return "editor-class-changed";if(target.AccessibleEditor!=null?!QtComposer.Current(target):!Composer(target.Window,target.Editor))return "composer-check-failed";return "changed-during-check";
+        }
+        bool ActivateComposer(PreviewChatTarget target){
+            if(!Valid(target))return false;
+            if(!SetForegroundWindow(target.Window)&&Native.GetForegroundWindow()!=target.Window)return false;
+            if(Native.GetForegroundWindow()!=target.Window||!Valid(target))return false;
+            if(target.AccessibleEditor!=null)return QtComposer.Focus(target);
+            if(Focus(target.ThreadId)!=target.Editor){
+                try{AutomationElement.FromHandle(target.Editor).SetFocus();}catch{return false;}
+            }
+            return Native.GetForegroundWindow()==target.Window&&Valid(target);
         }
         public async Task<PreviewPasteResult> TryPaste(PreviewChatTarget target,CancellationToken cancel,uint clipboardSequence,IntPtr sourceWindow){
             var checks=new PasteChecks{
@@ -172,13 +210,13 @@ namespace AgitCon {
                 SourceProblem=()=>disposed?"disposed":foregroundHook==IntPtr.Zero||nameHook==IntPtr.Zero?"observation-hooks-missing":"palette-not-foreground",
                 TargetProblem=()=>TargetProblem(target),TargetCurrent=()=>!disposed&&Valid(target),ClipboardCurrent=()=>GetClipboardSequenceNumber()==clipboardSequence,
                 ModifiersReleased=()=>Control.ModifierKeys==Keys.None,
-                TargetFocused=()=>Native.GetForegroundWindow()==target.Window&&Focus(target.ThreadId)==target.Editor,
-                SelectionProblem=()=>{string reason;return NoSelection(target.Editor,out reason)?null:reason;},
-                Activate=()=>{transition=true;return SetForegroundWindow(target.Window);},
+                TargetFocused=()=>IsFocused(target),
+                SelectionProblem=()=>{string reason;return (target.AccessibleEditor!=null?QtComposer.NoSelection(target,out reason):NoSelection(target.Editor,out reason))?null:reason;},
+                Activate=()=>{transition=true;return ActivateComposer(target);},
                 Pause=token=>Task.Delay(20,token),End=()=>transition=false,
                 Send=()=>{var keys=PasteKeys();uint sent=SendInput((uint)keys.Length,keys,Marshal.SizeOf(typeof(Input)));if(sent==keys.Length)return true;var release=new[]{Key(0x11,true)};SendInput(1,release,Marshal.SizeOf(typeof(Input)));Invalidate();return false;}
             };
-            var result=await PasteFlow.Run(pasteGate,checks,cancel);if(result.Requested)Invalidate();return result;
+            var result=await PasteFlow.Run(pasteGate,checks,cancel);if(result.Requested)Invalidate();else if(target==null)result.Reason=captureHint+" · 콘은 복사되어 있어요.";return result;
         }
         static bool SameRoom(PreviewChatTarget target){if(target==null||!Native.IsWindow(target.Window)||Native.IsIconic(target.Window)||Native.Title(target.Window)!=target.Title||!Native.IsKakao(target.Window))return false;uint pid;uint thread=Native.GetWindowThreadProcessId(target.Window,out pid);return pid==target.ProcessId&&thread==target.ThreadId&&Native.IsWindow(target.Editor)&&Native.GetAncestor(target.Editor,2)==target.Window;}
         static bool OwnedByRoom(IntPtr window,PreviewChatTarget target){if(target==null)return false;uint pid;Native.GetWindowThreadProcessId(window,out pid);if(pid!=target.ProcessId)return false;for(IntPtr owner=GetWindow(window,4);owner!=IntPtr.Zero;owner=GetWindow(owner,4))if(owner==target.Window)return true;return false;}
@@ -251,9 +289,10 @@ namespace AgitCon {
             string names=AttachmentFileNames(paths,expected);await pasteGate.WaitAsync(cancel);try{
                 var result=new PreviewPasteResult{Stage="nine-file-prepare",Reason="첨부 대상을 확인하지 못했어요. 카톡 입력창을 누른 뒤 다시 시도해주세요."};
                 if(!Valid(target)){result.Block="target/not-current";return result;}
+                if(target.AccessibleEditor!=null){result.Block="target/qt-file-dialog-unverified";result.Reason="신형 카톡의 여러 파일 첨부창은 아직 검증되지 않았어요. 파일을 직접 첨부해주세요.";return result;}
                 if(PhotoDialogs(target).Count!=0){result.Block="dialog/already-open";result.Reason="기존 카톡 파일 선택창을 닫고 다시 시도해주세요.";return result;}
                 RememberFileDialogs(target);photoFocusLost=false;photoTarget=target;FileAttachmentInProgress=true;
-                var checks=new PasteChecks{SourceCurrent=()=>!disposed&&foregroundHook!=IntPtr.Zero&&nameHook!=IntPtr.Zero&&Native.GetForegroundWindow()==sourceWindow&&Own(sourceWindow),TargetCurrent=()=>Valid(target),ClipboardCurrent=()=>true,ModifiersReleased=()=>Control.ModifierKeys==Keys.None,TargetFocused=()=>Native.GetForegroundWindow()==target.Window&&Focus(target.ThreadId)==target.Editor,SelectionProblem=()=>{string reason;return NoSelection(target.Editor,out reason)?null:reason;},Activate=()=>{transition=true;return SetForegroundWindow(target.Window);},Pause=token=>Task.Delay(20,token),Send=()=>{var keys=FileDialogKeys();if(SendInput((uint)keys.Length,keys,Marshal.SizeOf(typeof(Input)))==keys.Length)return true;var release=new[]{Key(0x11,true)};SendInput(1,release,Marshal.SizeOf(typeof(Input)));return false;}};
+                var checks=new PasteChecks{SourceCurrent=()=>!disposed&&foregroundHook!=IntPtr.Zero&&nameHook!=IntPtr.Zero&&Native.GetForegroundWindow()==sourceWindow&&Own(sourceWindow),TargetCurrent=()=>Valid(target),ClipboardCurrent=()=>true,ModifiersReleased=()=>Control.ModifierKeys==Keys.None,TargetFocused=()=>IsFocused(target),SelectionProblem=()=>{string reason;return NoSelection(target.Editor,out reason)?null:reason;},Activate=()=>{transition=true;return ActivateComposer(target);},Pause=token=>Task.Delay(20,token),Send=()=>{var keys=FileDialogKeys();if(SendInput((uint)keys.Length,keys,Marshal.SizeOf(typeof(Input)))==keys.Length)return true;var release=new[]{Key(0x11,true)};SendInput(1,release,Marshal.SizeOf(typeof(Input)));return false;}};
                 var opened=await PasteFlow.Execute(checks,cancel);if(!opened.Requested){opened.Reason="카톡 첨부창을 열지 못했어요. 입력창을 클릭한 뒤 다시 시도해주세요.";return opened;}
                 IntPtr dialog=IntPtr.Zero;result.Stage="nine-file-dialog-wait";
                 for(int i=0;i<50;i++){
@@ -274,6 +313,7 @@ namespace AgitCon {
                 bool direct=gifDirectSend&&!verificationOnly;
                 cancel.ThrowIfCancellationRequested();var blocked=new PreviewPasteResult{Stage="photo-prepare",Reason="첨부 대상이 불확실해 GIF 파일만 복사했어요. 카톡의 파일 첨부에서 직접 골라주세요."};
                 if(target==null){blocked.Block="target/not-captured";return blocked;}
+                if(target.AccessibleEditor!=null){blocked.Block="target/qt-file-dialog-unverified";blocked.Reason="신형 카톡의 GIF 첨부창은 아직 검증되지 않았어요. 복사한 파일을 직접 첨부해주세요.";return blocked;}
                 BindPersistentGif(target.ProcessId);
                 if(!GifAttachment.AnimatedGif(gif)){blocked.Block="asset/not-animated-gif";return blocked;}
                 if(PhotoDialogs(target).Count!=0){blocked.Block="dialog/already-open";return blocked;}
@@ -300,7 +340,7 @@ namespace AgitCon {
                     }
                 }
                 if(verificationOnly)return new PreviewPasteResult{Stage="photo-confirmation-only",Reason=ConfirmedGifSession(target.ProcessId)?"verified":"not-verified",Block=ConfirmedGifSession(target.ProcessId)?null:"settings/no-proof"};
-                var checks=new PasteChecks{SourceCurrent=()=>!disposed&&foregroundHook!=IntPtr.Zero&&nameHook!=IntPtr.Zero&&Native.GetForegroundWindow()==sourceWindow&&Own(sourceWindow),TargetCurrent=()=>Valid(target),ClipboardCurrent=()=>true,ModifiersReleased=()=>Control.ModifierKeys==Keys.None,TargetFocused=()=>Native.GetForegroundWindow()==target.Window&&Focus(target.ThreadId)==target.Editor,SelectionProblem=()=>{string reason;return NoSelection(target.Editor,out reason)?null:reason;},Activate=()=>{transition=true;return SetForegroundWindow(target.Window);},Pause=token=>Task.Delay(20,token),Send=()=>{var keys=FileDialogKeys();if(SendInput((uint)keys.Length,keys,Marshal.SizeOf(typeof(Input)))==keys.Length)return true;var release=new[]{Key(0x11,true)};SendInput(1,release,Marshal.SizeOf(typeof(Input)));return false;}};
+                var checks=new PasteChecks{SourceCurrent=()=>!disposed&&foregroundHook!=IntPtr.Zero&&nameHook!=IntPtr.Zero&&Native.GetForegroundWindow()==sourceWindow&&Own(sourceWindow),TargetCurrent=()=>Valid(target),ClipboardCurrent=()=>true,ModifiersReleased=()=>Control.ModifierKeys==Keys.None,TargetFocused=()=>IsFocused(target),SelectionProblem=()=>{string reason;return NoSelection(target.Editor,out reason)?null:reason;},Activate=()=>{transition=true;return ActivateComposer(target);},Pause=token=>Task.Delay(20,token),Send=()=>{var keys=FileDialogKeys();if(SendInput((uint)keys.Length,keys,Marshal.SizeOf(typeof(Input)))==keys.Length)return true;var release=new[]{Key(0x11,true)};SendInput(1,release,Marshal.SizeOf(typeof(Input)));return false;}};
                 var opened=await PasteFlow.Execute(checks,cancel);if(!opened.Requested)return opened;
                 IntPtr dialog=IntPtr.Zero;
                 blocked.Stage="photo-dialog-wait";
@@ -334,8 +374,8 @@ namespace AgitCon {
                     Func<Task<PreviewPasteResult>> run=()=>PasteFlow.Run(new SemaphoreSlim(1),create(),CancellationToken.None);
                     reset();check((await run()).Requested&&activate==1&&send==1);
                     reset();source=false;check(!(await run()).Requested&&activate==0&&send==0);
-                    reset();target=false;var missingTarget=await run();check(!missingTarget.Requested&&activate==0&&missingTarget.Stage=="initial"&&missingTarget.Block.StartsWith("target/"));
-                    reset();clip=false;check(!(await run()).Requested&&activate==0);
+                    reset();target=false;var missingTarget=await run();check(!missingTarget.Requested&&activate==0&&missingTarget.Stage=="initial"&&missingTarget.Block.StartsWith("target/")&&missingTarget.Reason.Contains("입력창"));
+                    reset();clip=false;var changedClip=await run();check(!changedClip.Requested&&activate==0&&changedClip.Reason.Contains("클립보드"));
                     reset();selection="selected draft";check(!(await run()).Requested&&activate==0);
                     reset();atProbe=n=>{if(n==1)source=false;};check(!(await run()).Requested&&activate==0);
                     reset();atProbe=n=>{if(n==1)clip=false;};check(!(await run()).Requested&&activate==0);
@@ -357,6 +397,6 @@ namespace AgitCon {
                 }catch(Exception ex){System.IO.File.WriteAllText(report,"FAIL: "+ex);Environment.ExitCode=1;}finally{timer.Dispose();context.ExitThread();}
             };timer.Start();Application.Run(context);
         }
-        public static void Test(){string report=System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"preview-paste-test.txt");try{var keys=PasteKeys();if(keys.Length!=4||keys.Any(k=>k.Data.Keyboard.Key==0x0d)||keys[0].Data.Keyboard.Key!=0x11||keys[1].Data.Keyboard.Key!=0x56||keys[2].Data.Keyboard.Flags!=2||keys[3].Data.Keyboard.Flags!=2)throw new Exception("Unexpected paste key sequence");if(Marshal.SizeOf(typeof(Input))!=(IntPtr.Size==8?40:28))throw new Exception("Native INPUT structure size");using(var box=new RichTextBox()){box.Text="유지할 문장";IntPtr handle=box.Handle;string reason;box.Select(0,2);if(NoSelection(handle,out reason))throw new Exception("Selected draft text must block automatic paste");box.Select(box.TextLength,0);if(!NoSelection(handle,out reason))throw new Exception("Caret selection must be recognized");if(box.Text!="유지할 문장")throw new Exception("Selection probe changed text");}System.IO.File.WriteAllText(report,"PASS: Ctrl+V-only sequence, no Enter, Win64 layout, selected text blocks, text preserved. No key injection, clipboard, or KakaoTalk interaction.\r\n");}catch(Exception ex){System.IO.File.WriteAllText(report,"FAIL: "+ex);Environment.ExitCode=1;}}
+        public static void Test(){string report=System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"preview-paste-test.txt");try{var keys=PasteKeys();if(keys.Length!=4||keys.Any(k=>k.Data.Keyboard.Key==0x0d)||keys[0].Data.Keyboard.Key!=0x11||keys[1].Data.Keyboard.Key!=0x56||keys[2].Data.Keyboard.Flags!=2||keys[3].Data.Keyboard.Flags!=2)throw new Exception("Unexpected paste key sequence");if(Marshal.SizeOf(typeof(Input))!=(IntPtr.Size==8?40:28))throw new Exception("Native INPUT structure size");using(var box=new RichTextBox()){box.Text="유지할 문장";IntPtr handle=box.Handle;string reason;box.Select(0,2);if(NoSelection(handle,out reason))throw new Exception("Selected draft text must block automatic paste");box.Select(box.TextLength,0);if(!NoSelection(handle,out reason))throw new Exception("Caret selection must be recognized");if(box.Text!="유지할 문장")throw new Exception("Selection probe changed text");using(var monitor=new PreviewPaste(false)){var element=AutomationElement.FromHandle(handle);monitor.current=new PreviewChatTarget{Window=handle,Editor=handle,AccessibleEditor=element,AccessibleId="fixture-runtime"};var snapshot=monitor.Snapshot();if(snapshot.AccessibleEditor!=element||snapshot.AccessibleId!="fixture-runtime")throw new Exception("Qt accessibility identity lost by snapshot");}}int qtChecks=QtComposer.TestGeometry();System.IO.File.WriteAllText(report,"PASS: "+qtChecks+" Qt process/physical geometry cases, preserved accessibility snapshot identity; Ctrl+V-only sequence, no Enter, Win64 layout, selected text blocks, text preserved. No key injection, clipboard, or KakaoTalk interaction.\r\n");}catch(Exception ex){System.IO.File.WriteAllText(report,"FAIL: "+ex);Environment.ExitCode=1;}}
     }
 }
