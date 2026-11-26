@@ -334,7 +334,7 @@ namespace AgitCon {
             try{progress.Report("조각 "+selected.Count+"장을 모두 미리 준비하고 있어요…");using(var prepared=await Task.Run(()=>LongPrepared.Create(selected,request.Token,n=>progress.Report("미리 준비 "+n+" / "+selected.Count+"장")),request.Token)){
                 request.Token.ThrowIfCancellationRequested();var outcome=await previewPaste.TryLongCon(destination,prepared,longWindow.Handle,request.Token,progress,()=>longSelecting&&roomVersion==versionAtStart,trace);
                 if(outcome.Requested>0){foreach(var entry in selected.Take(outcome.Requested))entry.LastUsed=DateTime.UtcNow.Ticks;Save();}
-                progress.Report(outcome.Complete?"롱콘 "+outcome.Requested+"장 전송 요청 완료 · 카톡에서 결과를 확인해주세요.":LongFlow.Reason(outcome.Stage)+" · 붙여넣기 "+outcome.Pasted+"장 / 자동 Enter "+outcome.Requested+"회. 이미 올라간 조각은 재시도하지 마세요.");
+                progress.Report(outcome.Complete?"롱콘 "+outcome.Requested+"장 전송 요청 완료 · 카톡에서 결과를 확인해주세요.":LongFlow.Reason(outcome.Stage)+" · 붙여넣기 "+outcome.Pasted+"장 / 확인창 전송 요청 "+outcome.Requested+"회. 이미 올라간 조각은 재시도하지 마세요.");
             }}catch(OperationCanceledException){trace(lastRequested,"canceled-"+lastStage);throw;}catch(Exception ex){trace(lastRequested,"failed-"+lastStage+" / "+ex.GetType().Name);throw;}finally{FinishCopy(request,false);}
         }
         void OpenCollection(){OpenCollectionMode(false);}
@@ -578,6 +578,7 @@ namespace AgitCon {
             if(args.Contains("--gif-attachment-test")){GifAttachment.Test();return;}
             if(args.Contains("--image-clipboard-files-test")){ImageClipboard.TestFiles(args.Skip(1).ToArray());return;}
             if(args.Contains("--image-clipboard-test")){ImageClipboard.Test();return;}
+            if(args.Contains("--qt-transfer-test")){QtTransferTests.Run();return;}
             if(args.Contains("--preview-paste-test")){PreviewPaste.Test();return;}
             if(args.Contains("--floating-test")){ChatFloating.Test();return;}
             if(args.Contains("--floating-position-test")){ChatFloating.TestPosition();return;}

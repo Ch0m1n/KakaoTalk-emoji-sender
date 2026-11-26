@@ -57,7 +57,7 @@ namespace AgitCon {
         }
         internal async Task<LongFlowResult> TryLongCon(PreviewChatTarget target,LongPrepared ready,IntPtr source,CancellationToken token,IProgress<string> progress,Func<bool> roomCurrent,Action<int,string> trace=null){
             await pasteGate.WaitAsync(token);try{
-                if(target!=null&&target.AccessibleEditor!=null)throw new InvalidOperationException("신형 카톡의 롱콘 전송창은 아직 검증되지 않았어요. 자동 연속 전송을 중단했어요.");
+                if(target!=null&&target.AccessibleEditor!=null)return await TryQtLongCon(target,ready,source,token,progress,roomCurrent,trace);
                 if(!Valid(target)||Native.GetForegroundWindow()!=source||!Own(source)||!roomCurrent())throw new InvalidOperationException("대상 채팅방이 바뀌었어요. 카톡 입력창을 누른 뒤 다시 확인해주세요.");
                 UIntPtr draftLength;if(SendMessageTimeout(target.Editor,0x000E,IntPtr.Zero,IntPtr.Zero,0x22,150,out draftLength)==IntPtr.Zero)throw new InvalidOperationException("작성 문장 상태를 확인하지 못했어요.");
                 long processStart;using(var process=Process.GetProcessById((int)target.ProcessId))processStart=process.StartTime.ToUniversalTime().Ticks;

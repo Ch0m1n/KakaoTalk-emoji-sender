@@ -47,7 +47,7 @@ if($version.version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'){thro
 $assemblyInfo=Join-Path $buildDir 'AssemblyInfo.cs'
 ('[assembly:System.Reflection.AssemblyVersion("'+$version.version+'.0")][assembly:System.Reflection.AssemblyFileVersion("'+$version.version+'.0")][assembly:System.Reflection.AssemblyProduct("KakaoTalk emoji sender")]') | Set-Content -LiteralPath $assemblyInfo -Encoding utf8
 $updateSources=@((Join-Path $root 'src/DpiPolicyTests.cs'),(Join-Path $root 'src/ThumbnailMemory.cs'),(Join-Path $root 'src/LongPreviewVision.cs'),(Join-Path $root 'src/ArcaBrowserSearch.cs'),(Join-Path $root 'src/ArcaSearchTests.cs'),(Join-Path $root 'src/AppUpdateCore.cs'),(Join-Path $root 'src/AppUpdates.cs'),(Join-Path $root 'src/AppUpdateTests.cs'),$assemblyInfo)
-$updateSources+=@((Join-Path $root "src/AutoPlaySettings.cs"),(Join-Path $root "src/QtComposer.cs"),(Join-Path $root "autoplay/tools/KakaoAutoPlayForm.cs"))
+$updateSources+=@((Join-Path $root "src/AutoPlaySettings.cs"),(Join-Path $root "src/QtComposer.cs"),(Join-Path $root "src/QtTransferUi.cs"),(Join-Path $root "src/QtTransferFlow.cs"),(Join-Path $root "src/QtTransferTests.cs"),(Join-Path $root "autoplay/tools/KakaoAutoPlayForm.cs"))
 $compression=@("/reference:System.Web.Extensions.dll",'/reference:System.IO.Compression.dll','/reference:System.IO.Compression.FileSystem.dll')
 $client = Join-Path $wpf 'UIAutomationClient.dll'
 $types = Join-Path $wpf 'UIAutomationTypes.dll'
