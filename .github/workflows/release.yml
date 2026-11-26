@@ -1,4 +1,4 @@
-name: Build and release
+﻿name: Build and release
 on:
   push:
     branches: [main]
@@ -54,7 +54,8 @@ jobs:
         run: |
           ./tools/prepare-installer.ps1
           ./tools/build-installer.ps1 -Architecture $env:ARCHITECTURE
-          ./tools/test-installer.ps1 -Architecture $env:ARCHITECTURE
+          ./tools/test-installer.ps1 -Architecture $env:ARCHITECTURE -UseUpdater
+          ./tools/test-installer-preview.ps1 -Architecture $env:ARCHITECTURE
       - uses: actions/upload-artifact@v4
         with:
           name: AgitCon-${{ matrix.architecture }}

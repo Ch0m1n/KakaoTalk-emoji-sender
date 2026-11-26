@@ -22,6 +22,7 @@ __pycache__/
 *.log
 *.bin
 *sample*
+!/third_party/Microsoft-VCSamples-license.txt
 /dccon-*.html
 /ATTACHMENT-NOTES.md
 .env*
@@ -41,3 +42,5 @@ test-work/
 !/tools/test-import-portable.py
 !/tools/test-installer.ps1
 !/tools/prepare-installer.ps1
+!/tools/InstallerPreview.cs
+!/tools/test-installer-preview.ps1

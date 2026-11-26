@@ -241,7 +241,7 @@ internal class AutoPlayForm : Form
         try {
             if(action=="start"||action=="startup")BindOwner();
             string result=await Task.Run(()=>{
-                var info=new ProcessStartInfo(Path.Combine(root,"..","..","runtime","python","python.exe"),"\""+Path.Combine(root,"tools","kakao-portable-launcher.py")+"\" "+action+" --json"+(output==null?"":" --output \""+output+"\""));
+                var info=new ProcessStartInfo(Path.Combine(root,"..","..","runtime","python","python.exe"),"-X utf8 \""+Path.Combine(root,"tools","kakao-portable-launcher.py")+"\" "+action+" --json"+(output==null?"":" --output \""+output+"\""));
                 info.UseShellExecute=false;info.CreateNoWindow=true;info.RedirectStandardOutput=true;info.RedirectStandardError=true;
                 info.EnvironmentVariables["KAKAO_AUTOPLAY_EXE"]=Application.ExecutablePath;info.EnvironmentVariables["AGITCON_INTEGRATED"]="1";
                 info.StandardOutputEncoding=Encoding.UTF8;info.StandardErrorEncoding=Encoding.UTF8;info.EnvironmentVariables["PYTHONIOENCODING"]="utf-8";

@@ -1,6 +1,6 @@
 # KakaoTalk emoji sender · 아지트콘
 
-Windows PC 카카오톡 옆에서 디시콘·아카콘을 검색·첨부하고, 채팅방의 GIF·움직이는 WebP를 자동재생하는 통합 도우미예요. 카카오톡 클라이언트를 수정하거나 공식 이모티콘으로 등록하지 않아요.
+Windows PC 카카오톡 옆에서 디시콘·아카콘을 검색·첨부하고, 채팅방의 GIF·움직이는 WebP를 자동재생하는 통합 도우미예요. 설치된 카카오톡 파일을 수정하거나 공식 이모티콘으로 등록하지 않아요. 자동재생을 시작하면 Frida가 실행 중인 카톡의 이미지 표시 경로에 연결하며 종료 시 해제해요.
 
 ## 설치
 
@@ -10,7 +10,9 @@ Windows PC 카카오톡 옆에서 디시콘·아카콘을 검색·첨부하고, 
 
 예전 압축판에서 옮긴다면 설치 도중 **예전 압축판 폴더에서 콘과 설정 가져오기**를 선택하고 `AgitCon.exe`와 `data`가 있는 폴더를 지정하세요. 설정·별칭·받아둔 콘을 복사하고 내부 이미지 경로를 옮겨요. 원본과 이미 설치된 데이터는 덮어쓰지 않아요. 선택 AI 모델은 가져오지 않으므로 새 설치에서 다시 준비해야 해요. 설치판 업데이트와 제거 시 기존 데이터·모델은 유지돼요.
 
-기존 KakaoAutoPlay는 먼저 완전히 종료하고, 별도로 등록했던 자동 시작도 그 도우미에서 해제하세요. 이후 통합 앱의 로그인 자동 실행과 **설정 → 움짤 자동재생 → 아지트콘 실행 시 자동재생 시작**을 사용하세요. 두 재생기를 동시에 실행하지 마세요. ZIP은 기존 압축판 업데이트 호환용으로 계속 제공해요.
+기존 KakaoAutoPlay는 먼저 완전히 종료하고, 별도로 등록했던 자동 시작도 그 도우미에서 해제하세요. 이후 통합 앱의 로그인 자동 실행과 **설정 → 움짤 자동재생 → 아지트콘 실행 시 자동재생 시작**을 사용하세요. 두 재생기를 동시에 실행하지 마세요. 설치 없이 쓰려면 **AgitCon-win-x64.zip / AgitCon-win-x86.zip 포터블** 전체를 쓰기 가능한 폴더에 풀고 `AgitCon.exe`를 실행하세요. EXE만 따로 꺼내지 마세요. 포터블은 설정·콘을 그 폴더에 보관하며 ZIP으로 업데이트해요.
+
+설치 마법사는 95/98 시절의 클래식 스타일을 사용해요. 종이가 폴더 사이로 날아가는 애니메이션은 [Microsoft 공식 VCSamples의 원본 FILECOPY.AVI](https://github.com/microsoft/VCSamples/blob/9e1d4475555b76a17a3568369867f1d7b6cc6126/VC2008Samples/MFC/general/CmnCtrl1/filecopy.avi)를 변경 없이 재생해요. 파일 출처·SHA-256은 [source.json](installer/assets/source.json), 저작권·라이선스는 [Microsoft VCSamples 안내](third_party/Microsoft-VCSamples-license.txt)에 보존해요. 설치 스타일과 별개로 지원 OS는 Windows 10/11이에요.
 
 ## 기능
 
@@ -48,7 +50,8 @@ python tools/package-release.py --architecture x64
 python tools/test-unified.py x64
 pwsh -NoProfile -File tools/prepare-installer.ps1
 pwsh -NoProfile -File tools/build-installer.ps1 -Architecture x64
-pwsh -NoProfile -File tools/test-installer.ps1 -Architecture x64
+pwsh -NoProfile -File tools/test-installer.ps1 -Architecture x64 -UseUpdater
+pwsh -NoProfile -File tools/test-installer-preview.ps1 -Architecture x64
 ```
 
 빌드는 `artifacts/build`, 시험은 `artifacts/tests`, 배포 ZIP은 `releases/<버전>`에 출력돼요. `dist`는 로컬 실행용으로 분리돼요. AI 모델은 빌드에 필요하지 않아요. [릴리스 절차](docs/RELEASE.md)를 참고하세요.

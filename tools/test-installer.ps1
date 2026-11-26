@@ -1,4 +1,4 @@
-﻿param([ValidateSet('x86','x64')][string]$Architecture='x64')
+﻿param([ValidateSet('x86','x64')][string]$Architecture='x64',[switch]$UseUpdater)
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 $version=(Get-Content (Join-Path $root 'version.json') -Raw|ConvertFrom-Json).version
@@ -23,7 +23,19 @@ try{
     New-Item -ItemType Directory -Path (Join-Path $target 'data'),(Join-Path $target 'semantic/models') -Force|Out-Null
     [IO.File]::WriteAllText((Join-Path $target 'data/catalog.json'),'private-fixture')
     [IO.File]::WriteAllText((Join-Path $target 'semantic/models/keep.txt'),'model-fixture')
-    Invoke-Fixture $setup ($installArguments+' /LOG="'+(Join-Path $run 'upgrade.log')+'"')
+    if($UseUpdater){
+        $csc=Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
+        $stub=Join-Path $run 'old.cs'
+        'class Old {static void Main(){System.Threading.Thread.Sleep(2500);}}'|Set-Content -LiteralPath $stub
+        & $csc /nologo /target:winexe "/platform:$Architecture" "/out:$(Join-Path $target 'AgitCon.exe')" $stub
+        if($LASTEXITCODE){throw 'Parent fixture compilation failed'}
+        $old=Start-Process -FilePath (Join-Path $target 'AgitCon.exe') -WindowStyle Hidden -PassThru
+        $plan=@{Root=$target;Package=$setup;Sha256=(Get-FileHash -LiteralPath $setup).Hash.ToLowerInvariant();Version=$version;Process=$old.Id;Started=$old.StartTime.ToUniversalTime().Ticks;Installer=$true}
+        $planPath=Join-Path $run 'install.json';$plan|ConvertTo-Json|Set-Content -LiteralPath $planPath -Encoding utf8
+        Invoke-Fixture (Join-Path $pointer.stage 'AgitCon.Updater.exe') ('--apply "'+$planPath+'"')
+        if((Get-FileHash -LiteralPath (Join-Path $target 'AgitCon.exe')).Hash -ne (Get-FileHash -LiteralPath (Join-Path $pointer.stage 'AgitCon.exe')).Hash){throw 'Installer handoff did not replace parent fixture'}
+    }else{Invoke-Fixture $setup ($installArguments+' /LOG="'+(Join-Path $run 'upgrade.log')+'"')}
+
     if([IO.File]::ReadAllText((Join-Path $target 'data/catalog.json')) -ne 'private-fixture'){throw 'Upgrade changed user settings'}
     Invoke-Fixture (Join-Path $target 'unins000.exe') '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART';$installed=$false
     if(Test-Path (Join-Path $target 'AgitCon.exe')){throw 'Application files remained after uninstall'}

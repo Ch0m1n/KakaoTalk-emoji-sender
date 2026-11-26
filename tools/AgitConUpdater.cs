@@ -22,7 +22,7 @@ static class AgitConUpdater {
             if(plan.Installer){
                 if(UpdateCore.Hash(plan.Package)!=plan.Sha256||Path.GetFileName(plan.Package)!=UpdateCore.InstallerName(plan.Version))throw new InvalidDataException("설치 파일의 무결성을 확인하지 못했어요.");
                 if(UpdateCore.ParseVersion(FileVersionInfo.GetVersionInfo(plan.Package).ProductVersion.Trim())!=UpdateCore.ParseVersion(plan.Version))throw new InvalidDataException("설치 파일 버전이 달라요.");
-                var arguments="/SP- /SILENT /SUPPRESSMSGBOXES /NORESTART /UPDATEFROMAGIT=1 /DIR=\""+plan.Root.TrimEnd(Path.DirectorySeparatorChar)+"\"";
+                var arguments="/SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /UPDATEFROMAGIT=1 /DIR=\""+plan.Root.TrimEnd(Path.DirectorySeparatorChar)+"\"";
                 using(var setup=Process.Start(new ProcessStartInfo(plan.Package,arguments){UseShellExecute=false,WorkingDirectory=Path.GetDirectoryName(plan.Package)})){if(setup==null||!setup.WaitForExit(600000)||setup.ExitCode!=0)throw new IOException("설치를 마치지 못했어요. 설치 파일을 직접 실행해주세요.");}
             }else UpdateCore.Apply(plan,stage,exe=>{
                 var process=Process.Start(new ProcessStartInfo(exe){UseShellExecute=false,WorkingDirectory=plan.Root});
@@ -33,7 +33,7 @@ static class AgitConUpdater {
         }catch(Exception ex){
             if(parentExited&&plan!=null&&Object.Equals(ex.Data["RollbackComplete"],true))try{Process.Start(new ProcessStartInfo(Path.Combine(plan.Root,"AgitCon.exe")){UseShellExecute=false,WorkingDirectory=plan.Root});}catch{}
             try{if(result!=null)File.WriteAllText(result,"업데이트 실패: "+ex);}catch{}
-            MessageBox.Show("업데이트를 완료하지 못했어요. 기존 파일을 복구했거나 백업에 보관했어요.\n"+ex.Message,"아지트콘 업데이트",MessageBoxButtons.OK,MessageBoxIcon.Warning);Environment.ExitCode=1;
+            MessageBox.Show((plan!=null&&plan.Installer?"설치를 완료하지 못했어요. 설치 파일을 직접 실행해주세요.\n":"업데이트를 완료하지 못했어요. 기존 파일을 복구했거나 백업에 보관했어요.\n")+ex.Message,"아지트콘 업데이트",MessageBoxButtons.OK,MessageBoxIcon.Warning);Environment.ExitCode=1;
         }
     }
 }

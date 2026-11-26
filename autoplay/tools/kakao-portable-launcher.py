@@ -214,7 +214,7 @@ def run(action, output=None, background=False):
     signal.unlink(missing_ok=True)
     if not owner_alive(STATE):return '도우미 창이 종료되어 재생을 시작하지 않았어요.'
     with (STATE/'portable-launch.log').open('w', encoding='utf-8') as log:
-        subprocess.Popen([str(PYTHON), str(SERVICE)], cwd=ROOT, stdout=log, stderr=log,
+        subprocess.Popen([str(PYTHON), '-X', 'utf8', str(SERVICE)], cwd=ROOT, stdout=log, stderr=log,
                          creationflags=subprocess.CREATE_NO_WINDOW)
     for _ in range(75):
         if not owner_alive(STATE):return '도우미 창이 종료되어 재생을 정리하고 있어요.'

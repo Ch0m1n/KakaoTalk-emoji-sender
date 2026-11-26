@@ -1,7 +1,9 @@
-param([ValidateSet('x86','x64')][string]$Architecture='x64',[string]$Compiler=(Join-Path $PSScriptRoot '../artifacts/tooling/InnoSetup/ISCC.exe'))
+﻿param([ValidateSet('x86','x64')][string]$Architecture='x64',[string]$Compiler=(Join-Path $PSScriptRoot '../artifacts/tooling/InnoSetup/ISCC.exe'))
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 $version=(Get-Content (Join-Path $root 'version.json') -Raw|ConvertFrom-Json).version
+$original=Join-Path $root 'installer/assets/filecopy.avi'
+if((Get-FileHash -LiteralPath $original).Hash.ToLowerInvariant() -ne 'c49c3293383d2777beedf2265f01d87e9c122328681065e9eb2f9c1d5a75ccce'){throw 'Original Microsoft AVI changed'}
 $pointer=Get-Content (Join-Path $root "artifacts/packages/latest-$Architecture.json") -Raw|ConvertFrom-Json
 $payload=[IO.Path]::GetFullPath($pointer.stage)
 if(!$payload.StartsWith([IO.Path]::GetFullPath((Join-Path $root 'artifacts/packages/')),[StringComparison]::OrdinalIgnoreCase)){throw 'Payload outside package staging root'}

@@ -1,0 +1,8 @@
+{
+  "source": "https://raw.githubusercontent.com/microsoft/VCSamples/9e1d4475555b76a17a3568369867f1d7b6cc6126/VC2008Samples/MFC/general/CmnCtrl1/filecopy.avi",
+  "commit": "9e1d4475555b76a17a3568369867f1d7b6cc6126",
+  "sha256": "c49c3293383d2777beedf2265f01d87e9c122328681065e9eb2f9c1d5a75ccce",
+  "bytes": 9484,
+  "modified": false,
+  "license": "../../third_party/Microsoft-VCSamples-license.txt"
+}

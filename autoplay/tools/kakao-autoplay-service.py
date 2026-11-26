@@ -163,7 +163,7 @@ class Worker:
         environment['KAKAO_AUTOPLAY_MANAGER_PID']=str(os.getpid())
         environment['KAKAO_AUTOPLAY_MANAGER_CREATED']=str(creation_time(os.getpid()))
         self.process = subprocess.Popen([
-            sys.executable, str(ROOT/'tools/trace-kakao-player.py'), '--pid', str(key[0]),
+            sys.executable, '-X', 'utf8', str(ROOT/'tools/trace-kakao-player.py'), '--pid', str(key[0]),
             '--seconds', '0', '--bridge', '--auto-gifs', '--download-originals',
             '--chat-window', str(hwnd), '--control-file', str(STATE/'autoplay-control.json'),
             '--stop-file', str(self.signal)], cwd=ROOT, stdout=self.out, stderr=self.err,
