@@ -40,8 +40,12 @@ namespace AgitCon {
                 object value;if(element.TryGetCurrentPattern(ValuePattern.Pattern,out value)&&((ValuePattern)value).Current.IsReadOnly)return false;
                 // A provider without a selection pattern cannot protect existing draft selections.
                 if(!element.TryGetCurrentPattern(TextPattern.Pattern,out value))return false;
-                Native.Rect chat;if(!DpiGeometry.GetPhysicalRect(window,out chat))return false;var r=info.BoundingRectangle;
-                return Geometry(chat,r);
+                // UIA can virtualize the editor bounds for a DPI-unaware caller.
+                // Read both rectangles in the same physical coordinate space.
+                return DpiGeometry.InWindowContext(window,true,()=>{
+                    Native.Rect chat;
+                    return Native.GetWindowRect(window,out chat)&&Geometry(chat,info.BoundingRectangle);
+                });
             }catch{return false;}
         }
         internal static AutomationElement Find(IntPtr window,uint process,bool searchTree=true){
